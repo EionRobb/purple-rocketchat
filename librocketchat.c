@@ -210,7 +210,6 @@ typedef struct {
 	guint64 frame_len_progress;
 	
 	gint64 id; //incrementing counter
-	gint64 opid; //todo remove me
 	
 	GHashTable *one_to_ones;     // A store of known groupId's->userId's
 	GHashTable *one_to_ones_rev; // A store of known userId's->groupId's
@@ -586,13 +585,23 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 		json_object_set_string_member(response, "msg", "pong");
 	} else if (purple_strequal(msg, "added")) {
 		const gchar *collection = json_object_get_string_member(obj, "collection");
-		//a["{\"msg\":\"added\",\"collection\":\"users\",\"id\":\"M6m6odi9ufFJtFzZ3\",\"fields\":{\"status\":\"online\",\"username\":\"ali-14\",\"utcOffset\":3.5}}"]
+
+	// a["{\"msg\":\"added\",\"collection\":\"users\",\"id\":\"hZKg86uJavE6jYLya\",\"fields\":{\"emails\":[{\"address\":\"eion@robbmob.com\",\"verified\":true}],\"username\":\"eionrobb\"}}"]
+
+	//a["{\"msg\":\"added\",\"collection\":\"users\",\"id\":\"M6m6odi9ufFJtFzZ3\",\"fields\":{\"status\":\"online\",\"username\":\"ali-14\",\"utcOffset\":3.5}}"]
 		if (purple_strequal(collection, "users")) {
 			JsonObject *fields = json_object_get_object_member(obj, "fields");
 			const gchar *username = json_object_get_string_member(fields, "username");
 			const gchar *status = json_object_get_string_member(fields, "status");
 			
-			purple_protocol_got_user_status(ya->account, username, status, NULL);
+			if (status != NULL) {
+				purple_protocol_got_user_status(ya->account, username, status, NULL);
+			}
+			
+			if (!ya->self_user) {
+				// The first user added to the collection is us
+				ya->self_user = g_strdup(username);
+			}
 		}
 	} else if (purple_strequal(msg, "changed")) {
 		const gchar *collection = json_object_get_string_member(obj, "collection");
@@ -718,9 +727,6 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 		purple_connection_error(ya->pc, PURPLE_CONNECTION_ERROR_NETWORK_ERROR, "Failed to connect to server");
 	}
 	
-	// TODO link login details with username
-	// a["{\"msg\":\"added\",\"collection\":\"users\",\"id\":\"hZKg86uJavE6jYLya\",\"fields\":{\"emails\":[{\"address\":\"eion@robbmob.com\",\"verified\":true}],\"username\":\"eionrobb\"}}"]
-	
 	if (!json_object_has_member(obj, "msg") && json_object_has_member(obj, "server_id")) {
 		JsonArray *support = json_array_new();
 		//["{\"msg\":\"connect\",\"version\":\"1\",\"support\":[\"1\",\"pre2\",\"pre1\"]}"]
@@ -737,6 +743,96 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 		rc_socket_write_json(ya, response);
 	}
 }
+
+static void
+rc_roomlist_got_list(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
+{
+	//a["{\"msg\":\"result\",\"id\":\"13\",\"result\":{\"channels\":[{\"_id\":\"oJmjKQJyixALtty5g\",\"name\":\"commitee\"},{\"_id\":\"jtQDeqzzf2M8oe7Bq\",\"name\":\"enspiral\"},{\"_id\":\"GENERAL\",\"name\":\"general\"},{\"_id\":\"GzxgcmSRcCoSg3tmJ\",\"name\":\"meetupchch\"},{\"_id\":\"EqssvQgYZ9HEFsJ7g\",\"name\":\"technical\"}]}}"]
+	PurpleRoomlist *roomlist = user_data;
+	JsonObject *result = json_node_get_object(node);
+	JsonArray *channels = json_object_get_array_member(result, "channels");
+	guint i, len = json_array_get_length(channels);
+			
+	for (i = 0; i < len; i++) {
+		JsonObject *channel = json_array_get_object_element(channels, i);
+		const gchar *id = json_object_get_string_member(channel, "_id");
+		const gchar *name = json_object_get_string_member(channel, "name");
+		PurpleRoomlistRoom *room = purple_roomlist_room_new(PURPLE_ROOMLIST_ROOMTYPE_ROOM, id, NULL);
+		
+		purple_roomlist_room_add_field(roomlist, room, id);
+		purple_roomlist_room_add_field(roomlist, room, name);
+		
+		purple_roomlist_room_add(roomlist, room);
+	}
+	
+	purple_roomlist_set_in_progress(roomlist, FALSE);
+}
+
+PurpleRoomlist *
+rc_roomlist_get_list(PurpleConnection *pc)
+{
+	RocketChatAccount *ya = purple_connection_get_protocol_data(pc);
+	PurpleRoomlist *roomlist;
+	GList *fields = NULL;
+	PurpleRoomlistField *f;
+	
+	roomlist = purple_roomlist_new(ya->account);
+
+	f = purple_roomlist_field_new(PURPLE_ROOMLIST_FIELD_STRING, _("ID"), "id", TRUE);
+	fields = g_list_append(fields, f);
+
+	f = purple_roomlist_field_new(PURPLE_ROOMLIST_FIELD_STRING, _("Name"), "name", FALSE);
+	fields = g_list_append(fields, f);
+
+	purple_roomlist_set_fields(roomlist, fields);
+	purple_roomlist_set_in_progress(roomlist, TRUE);
+	
+	{
+		//["{\"msg\":\"method\",\"method\":\"channelsList\",\"params\":[\"\",50,\"name\"],\"id\":\"13\"}"]
+		JsonObject *data = json_object_new();
+		JsonArray *params = json_array_new();
+		
+		json_array_add_string_element(params, ""); // filter
+		json_array_add_string_element(params, ""); // channel type  (public, private)
+		json_array_add_int_element(params, 500); // limit
+		json_array_add_string_element(params, "msgs"); // sort-by (msgs, name)
+		
+		json_object_set_string_member(data, "msg", "method");
+		json_object_set_string_member(data, "method", "channelsList");
+		json_object_set_array_member(data, "params", params);
+		json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_roomlist_got_list, roomlist));
+		
+		rc_socket_write_json(ya, data);
+	}
+	
+	
+	return roomlist;
+}
+
+
+void
+rc_set_status(PurpleAccount *account, PurpleStatus *status)
+{
+	PurpleConnection *pc = purple_account_get_connection(account);
+	RocketChatAccount *ya = purple_connection_get_protocol_data(pc);
+	
+	//["{\"msg\":\"method\",\"method\":\"UserPresence:away\",\"params\":[],\"id\":\"10\"}"]
+	JsonObject *data = json_object_new();
+	JsonArray *params = json_array_new();
+	gchar *method;
+	
+	json_object_set_string_member(data, "msg", "method");
+	
+	method = g_strdup_printf("UserPresence:%s", purple_status_get_id(status));
+	json_object_set_string_member(data, "method", method);
+	g_free(method);
+	
+	json_object_set_array_member(data, "params", params);
+	json_object_set_string_member(data, "id", rc_get_next_id_str(ya));
+	
+	rc_socket_write_json(ya, data);
+}
+
 
 static void rc_start_socket(RocketChatAccount *ya);
 
@@ -766,7 +862,7 @@ rc_build_groups_from_blist(RocketChatAccount *ya)
 			if (room_id == NULL) {
 				GHashTable *components = purple_chat_get_components(chat);
 				if (components != NULL) {
-					room_id = g_hash_table_lookup(components, "room_id");
+					room_id = g_hash_table_lookup(components, "id");
 				}
 			}
 			if (room_id != NULL) {
@@ -853,14 +949,14 @@ rc_close(PurpleConnection *pc)
 	g_hash_table_remove_all(ya->result_callbacks);
 	g_hash_table_unref(ya->result_callbacks);
 
-#if !PURPLE_VERSION_CHECK(3, 0, 0)
 	while (ya->http_conns) {
+#	if !PURPLE_VERSION_CHECK(3, 0, 0)
 		purple_util_fetch_url_cancel(ya->http_conns->data);
+#	else
+		purple_http_conn_cancel(ya->http_conns->data);
+#	endif
 		ya->http_conns = g_slist_delete_link(ya->http_conns, ya->http_conns);
 	}
-#else
-	// TODO: cancel ya->http_conns here
-#endif
 
 	while (ya->pending_writes) {
 		json_object_unref(ya->pending_writes->data);
@@ -928,7 +1024,7 @@ rc_process_frame(RocketChatAccount *rca, const gchar *frame)
 			purple_debug_warning("rocketchat", "object type not handled\n");
 		} else {
 			//TODO is this going to happen?
-			purple_debug_error("rocketchat", "unknown frame type\n");
+			purple_debug_error("rocketchat", "unknown frame type '%c'\n", frame_type);
 		}
 	}
 	
@@ -1427,7 +1523,9 @@ rc_join_room(RocketChatAccount *ya, const gchar *room_id)
 	JsonObject *data = json_object_new();
 	JsonArray *params = json_array_new();
 	gchar *id;
+	gchar *sub_id;
 	
+	// Subscribe to messages
 	json_object_set_string_member(data, "msg", "sub");
 	
 	id = g_strdup_printf("%012XFFFF", g_random_int());
@@ -1439,10 +1537,28 @@ rc_join_room(RocketChatAccount *ya, const gchar *room_id)
 	json_object_set_string_member(data, "name", "stream-room-messages");
 	json_object_set_array_member(data, "params", params);
 	
+	rc_socket_write_json(ya, data);
+	
+	// Subscribe to typing notifications
+	data = json_object_new();
+	params = json_array_new();
+	json_object_set_string_member(data, "msg", "sub");
+	
+	id = g_strdup_printf("%012XFFFF", g_random_int());
+	json_object_set_string_member(data, "id", id);
+	g_free(id);
+	
+	sub_id = g_strdup_printf("%s/%s", room_id, "typing");
+	json_array_add_string_element(params, sub_id);
+	g_free(sub_id);
+	
+	json_array_add_boolean_element(params, FALSE);
+	json_object_set_string_member(data, "name", "stream-notify-room");
+	json_object_set_array_member(data, "params", params);
 	
 	rc_socket_write_json(ya, data);
 	
-	//TODO notify-room subs
+	//TODO subscribe to delete message notifications
 	
 	// Download a list of admins
 	data = json_object_new();
@@ -1777,20 +1893,22 @@ plugin_init(PurplePlugin *plugin)
 	prpl_info->icon_spec.scale_rules = PURPLE_ICON_SCALE_DISPLAY;
 	
 	prpl_info->list_icon = rc_list_icon;
+	prpl_info->set_status = rc_set_status;
 	prpl_info->status_types = rc_status_types;
 	prpl_info->chat_info = rc_chat_info;
 	prpl_info->chat_info_defaults = rc_chat_info_defaults;
 	prpl_info->login = rc_login;
 	prpl_info->close = rc_close;
 	prpl_info->send_im = rc_send_im;
-	prpl_info->add_deny = rc_block_user;
-	prpl_info->rem_deny = rc_unblock_user;
+	// prpl_info->add_deny = rc_block_user;
+	// prpl_info->rem_deny = rc_unblock_user;
 	prpl_info->join_chat = rc_join_chat;
 	prpl_info->get_chat_name = rc_get_chat_name;
 	prpl_info->chat_invite = rc_chat_invite;
 	prpl_info->chat_send = rc_chat_send;
 	prpl_info->add_buddy = rc_add_buddy;
 	
+	prpl_info->roomlist_get_list = rc_roomlist_get_list;
 }
 
 static PurplePluginInfo info = {
@@ -1898,6 +2016,13 @@ static void
 rc_protocol_server_iface_init(PurpleProtocolServerIface *prpl_info)
 {
 	prpl_info->add_buddy = rc_add_buddy;
+	prpl_info->set_status = rc_set_status;
+}
+
+static void 
+rc_protocol_roomlist_iface_init(PurpleProtocolRoomlistIface *prpl_info)
+{
+	prpl_info->get_list = rc_roomlist_get_list;
 }
 
 static PurpleProtocol *rc_protocol;
@@ -1916,6 +2041,9 @@ PURPLE_DEFINE_TYPE_EXTENDED(
 
 	PURPLE_IMPLEMENT_INTERFACE_STATIC(PURPLE_TYPE_PROTOCOL_SERVER_IFACE,
 	                                  rc_protocol_server_iface_init)
+
+	PURPLE_IMPLEMENT_INTERFACE_STATIC(PURPLE_TYPE_PROTOCOL_ROOMLIST_IFACE,
+	                                  hangouts_protocol_roomlist_iface_init)
 
 );
 
