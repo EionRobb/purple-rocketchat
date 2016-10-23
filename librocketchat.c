@@ -117,15 +117,19 @@ g_str_insensitive_hash(gconstpointer v)
 #if !PURPLE_VERSION_CHECK(3, 0, 0)
 
 #define purple_connection_error                 purple_connection_error_reason
+#define purple_connection_get_protocol          purple_connection_get_prpl
 #define PURPLE_CONNECTION_CONNECTING       PURPLE_CONNECTING
 #define PURPLE_CONNECTION_CONNECTED        PURPLE_CONNECTED
 #define purple_blist_find_group        purple_find_group
+#define purple_protocol_get_id  purple_plugin_get_id
 #define PurpleProtocolChatEntry  struct proto_chat_entry
 #define PurpleChatConversation             PurpleConvChat
 #define PurpleIMConversation               PurpleConvIm
 #define purple_conversations_find_chat_with_account(id, account) \
 		PURPLE_CONV_CHAT(purple_find_conversation_with_account(PURPLE_CONV_TYPE_CHAT, id, account))
 #define purple_chat_conversation_has_left     purple_conv_chat_has_left
+#define PURPLE_IS_IM_CONVERSATION(conv)       (purple_conversation_get_type(conv) == PURPLE_CONV_TYPE_IM)
+#define PURPLE_IS_CHAT_CONVERSATION(conv)     (purple_conversation_get_type(conv) == PURPLE_CONV_TYPE_CHAT)
 #define PURPLE_CONVERSATION(chatorim)         (chatorim == NULL ? NULL : chatorim->conv)
 #define PURPLE_IM_CONVERSATION(conv)          PURPLE_CONV_IM(conv)
 #define PURPLE_CHAT_CONVERSATION(conv)        PURPLE_CONV_CHAT(conv)
@@ -138,6 +142,31 @@ g_str_insensitive_hash(gconstpointer v)
 #define PurpleChatUserFlags  PurpleConvChatBuddyFlags
 #define PURPLE_CHAT_USER_NONE     PURPLE_CBFLAGS_NONE
 #define PURPLE_CHAT_USER_OP       PURPLE_CBFLAGS_OP
+#define PURPLE_CHAT_USER_FOUNDER  PURPLE_CBFLAGS_FOUNDER
+#define PURPLE_CHAT_USER_TYPING   PURPLE_CBFLAGS_TYPING
+#define PURPLE_CHAT_USER_AWAY     PURPLE_CBFLAGS_AWAY
+#define PURPLE_CHAT_USER_HALFOP   PURPLE_CBFLAGS_HALFOP
+#define PURPLE_CHAT_USER_VOICE    PURPLE_CBFLAGS_VOICE
+#define PURPLE_CHAT_USER_TYPING   PURPLE_CBFLAGS_TYPING
+#define PurpleChatUser  PurpleConvChatBuddy
+static inline PurpleChatUser *
+purple_chat_conversation_find_user(PurpleChatConversation *chat, const char *name)
+{
+	PurpleChatUser *cb = purple_conv_chat_cb_find(chat, name);
+	
+	if (cb != NULL) {
+		g_dataset_set_data(cb, "chat", chat);
+	}
+	
+	return cb;
+}
+#define purple_chat_user_get_flags(cb)     purple_conv_chat_user_get_flags(g_dataset_get_data((cb), "chat"), (cb)->name)
+#define purple_chat_user_set_flags(cb, f)  purple_conv_chat_user_set_flags(g_dataset_get_data((cb), "chat"), (cb)->name, (f))
+#define purple_chat_user_set_alias(cb, a)  ((cb)->alias = (a))
+#define PurpleIMTypingState	PurpleTypingState
+#define PURPLE_IM_NOT_TYPING	PURPLE_NOT_TYPING
+#define PURPLE_IM_TYPING	PURPLE_TYPING
+#define PURPLE_IM_TYPED		PURPLE_TYPED
 #define purple_conversation_get_connection      purple_conversation_get_gc
 #define purple_chat_conversation_get_id         purple_conv_chat_get_id
 #define PURPLE_CMD_FLAG_PROTOCOL_ONLY  PURPLE_CMD_FLAG_PRPL_ONLY
@@ -150,6 +179,7 @@ g_str_insensitive_hash(gconstpointer v)
 #define purple_account_get_private_alias    purple_account_get_alias
 #define purple_protocol_got_user_status		purple_prpl_got_user_status
 #define purple_serv_got_im                         serv_got_im
+#define purple_serv_got_typing                     serv_got_typing
 #define purple_conversations_find_im_with_account(name, account)  \
 		PURPLE_CONV_IM(purple_find_conversation_with_account(PURPLE_CONV_TYPE_IM, name, account))
 #define purple_im_conversation_new(account, from) PURPLE_CONV_IM(purple_conversation_new(PURPLE_CONV_TYPE_IM, account, from))
@@ -175,6 +205,9 @@ purple_message_destroy(PurpleMessage *message)
 	g_free(message->what);
 	g_free(message);
 }
+
+#define purple_message_get_recipient(message)  (message->who)
+#define purple_message_get_contents(message)   (message->what)
 
 #define purple_account_privacy_deny_add     purple_privacy_deny_add
 #define purple_account_privacy_deny_remove  purple_privacy_deny_remove
@@ -211,11 +244,13 @@ typedef struct {
 	
 	gint64 id; //incrementing counter
 	
-	GHashTable *one_to_ones;     // A store of known groupId's->userId's
-	GHashTable *one_to_ones_rev; // A store of known userId's->groupId's
-	GHashTable *group_chats;     // A store of known multi-user groupId's
-	GHashTable *sent_message_ids;// A store of message id's that we generated from this instance
-	GHashTable *result_callbacks;// Result ID -> Callback function
+	GHashTable *one_to_ones;      // A store of known room_id's -> username's
+	GHashTable *one_to_ones_rev;  // A store of known usernames's -> room_id's
+	GHashTable *group_chats;      // A store of known multi-user room_id's
+	GHashTable *sent_message_ids; // A store of message id's that we generated from this instance
+	GHashTable *result_callbacks; // Result ID -> Callback function
+	GHashTable *usernames_to_ids; // username -> user id
+	GHashTable *ids_to_usernames; // user id -> username
 
 	GSList *http_conns; /**< PurpleHttpConnection to be cancelled on logout */
 	gint frames_since_reconnect;
@@ -534,6 +569,7 @@ rc_fetch_url(RocketChatAccount *ya, const gchar *url, const gchar *postdata, Roc
 }
 
 
+static void rc_join_room(RocketChatAccount *ya, const gchar *room_id);
 void rc_block_user(PurpleConnection *pc, const char *who);
 static void rc_socket_write_json(RocketChatAccount *ya, JsonObject *data);
 static GHashTable *rc_chat_info_defaults(PurpleConnection *pc, const char *chatname);
@@ -559,6 +595,15 @@ rc_account_connected(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
 	rc_socket_write_json(ya, data);
 	
 	purple_connection_set_state(ya->pc, PURPLE_CONNECTION_CONNECTED);
+	
+	// Subscribe to all direct messages rooms
+	{
+		GList *l, *dm_room_ids = g_hash_table_get_keys(ya->one_to_ones);
+		for (l = dm_room_ids; l; l = l->next) {
+			rc_join_room(ya, l->data);
+		}
+		g_list_free(dm_room_ids);
+	}
 }
 	
 static void
@@ -591,6 +636,7 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 	//a["{\"msg\":\"added\",\"collection\":\"users\",\"id\":\"M6m6odi9ufFJtFzZ3\",\"fields\":{\"status\":\"online\",\"username\":\"ali-14\",\"utcOffset\":3.5}}"]
 		if (purple_strequal(collection, "users")) {
 			JsonObject *fields = json_object_get_object_member(obj, "fields");
+			const gchar *user_id = json_object_get_string_member(obj, "id");
 			const gchar *username = json_object_get_string_member(fields, "username");
 			const gchar *status = json_object_get_string_member(fields, "status");
 			
@@ -602,15 +648,25 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 				// The first user added to the collection is us
 				ya->self_user = g_strdup(username);
 			}
+			
+			g_hash_table_replace(ya->usernames_to_ids, g_strdup(username), g_strdup(user_id));
+			g_hash_table_replace(ya->ids_to_usernames, g_strdup(user_id), g_strdup(username));
 		}
 	} else if (purple_strequal(msg, "changed")) {
 		const gchar *collection = json_object_get_string_member(obj, "collection");
 		if (purple_strequal(collection, "users")) {
 			JsonObject *fields = json_object_get_object_member(obj, "fields");
+			const gchar *user_id = json_object_get_string_member(obj, "id");
 			const gchar *username = json_object_get_string_member(fields, "username");
 			const gchar *status = json_object_get_string_member(fields, "status");
 			
-			purple_protocol_got_user_status(ya->account, username, status, NULL);
+			if (status != NULL) {
+				if (username == NULL) {
+					username = g_hash_table_lookup(ya->ids_to_usernames, user_id);
+				}
+				
+				purple_protocol_got_user_status(ya->account, username, status, NULL);
+			}
 			
 		} else if (purple_strequal(collection, "stream-room-messages")) {
 			//New incoming message
@@ -685,6 +741,54 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 				
 				g_free(message);
 			}
+		} else if (purple_strequal(collection, "stream-notify-room")) {
+			//a["{\"msg\":\"changed\",\"collection\":\"stream-notify-room\",\"id\":\"id\",\"fields\":{\"eventName\":\"GENERAL/typing\",\"args\":[\"Neilgle\",true]}}"]
+			JsonObject *fields = json_object_get_object_member(obj, "fields");
+			const gchar *eventName = json_object_get_string_member(fields, "eventName");
+			JsonArray *args = json_object_get_array_member(fields, "args");
+			gchar **event_split;
+			
+			event_split = g_strsplit(eventName, "/", 2);		
+			if (purple_strequal(event_split[1], "typing")) {
+				const gchar *room_id = event_split[0];
+				const gchar *username = json_array_get_string_element(args, 0);
+				gboolean is_typing = json_array_get_boolean_element(args, 1);
+				
+				if (g_hash_table_contains(ya->group_chats, room_id)) {
+					// This is a group conversation
+					PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_id, ya->account);
+					if (chatconv != NULL) {
+						PurpleChatUser *cb = purple_chat_conversation_find_user(chatconv, username);
+						PurpleChatUserFlags cbflags;
+
+						if (cb == NULL) {
+							// Getting notified about a buddy we dont know about yet
+							//TODO add buddy
+							return;
+						}
+						cbflags = purple_chat_user_get_flags(cb);
+						
+						if (is_typing)
+							cbflags |= PURPLE_CHAT_USER_TYPING;
+						else
+							cbflags &= ~PURPLE_CHAT_USER_TYPING;
+						
+						purple_chat_user_set_flags(cb, cbflags);
+					}
+				} else {
+					PurpleIMTypingState typing_state;
+					
+					if (is_typing) {
+						typing_state = PURPLE_IM_TYPING;
+					} else {
+						typing_state = PURPLE_IM_NOT_TYPING;
+					}
+					purple_serv_got_typing(ya->pc, username, 15, typing_state);
+					
+				}
+			}
+			g_strfreev(event_split);
+			
 		}
 	} else if (purple_strequal(msg, "connected")) {
 	
@@ -886,6 +990,9 @@ rc_build_groups_from_blist(RocketChatAccount *ya)
 	}
 }
 
+static guint rc_conv_send_typing(PurpleConversation *conv, PurpleIMTypingState state, RocketChatAccount *ya);
+static gulong chat_conversation_typing_signal = 0;
+
 void
 rc_login(PurpleAccount *account)
 {
@@ -907,6 +1014,8 @@ rc_login(PurpleAccount *account)
 	ya->group_chats = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
 	ya->sent_message_ids = g_hash_table_new_full(g_str_insensitive_hash, g_str_insensitive_equal, g_free, NULL);
 	ya->result_callbacks = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+	ya->usernames_to_ids = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+	ya->ids_to_usernames = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
 	
 	userparts = g_strsplit(username, (char[2]) {RC_SERVER_SPLIT_CHAR, '\0'}, 2);
 	purple_connection_set_display_name(pc, userparts[0]);
@@ -924,6 +1033,11 @@ rc_login(PurpleAccount *account)
 	g_free(url);
 	
 	rc_start_socket(ya);
+	
+	
+	if (!chat_conversation_typing_signal) {
+		chat_conversation_typing_signal = purple_signal_connect(purple_conversations_get_handle(), "chat-conversation-typing", purple_connection_get_protocol(pc), PURPLE_CALLBACK(rc_conv_send_typing), NULL);
+	}
 }
 
 
@@ -948,6 +1062,10 @@ rc_close(PurpleConnection *pc)
 	g_hash_table_unref(ya->sent_message_ids);
 	g_hash_table_remove_all(ya->result_callbacks);
 	g_hash_table_unref(ya->result_callbacks);
+	g_hash_table_remove_all(ya->usernames_to_ids);
+	g_hash_table_unref(ya->usernames_to_ids);
+	g_hash_table_remove_all(ya->ids_to_usernames);
+	g_hash_table_unref(ya->ids_to_usernames);
 
 	while (ya->http_conns) {
 #	if !PURPLE_VERSION_CHECK(3, 0, 0)
@@ -1613,7 +1731,78 @@ rc_join_chat(PurpleConnection *pc, GHashTable *data)
 	
 	purple_conversation_present(PURPLE_CONVERSATION(chatconv));
 	
+	g_hash_table_replace(ya->group_chats, g_strdup(id), NULL);
+	
 	rc_join_room(ya, id);
+}
+
+
+static guint
+rc_conv_send_typing(PurpleConversation *conv, PurpleIMTypingState state, RocketChatAccount *ya)
+{
+	PurpleConnection *pc;
+	const gchar *room_id;
+	gchar *typing_id;
+	JsonObject *data;
+	JsonArray *params;
+	
+	pc = ya ? ya->pc : purple_conversation_get_connection(conv);
+	
+	if (!PURPLE_CONNECTION_IS_CONNECTED(pc))
+		return 0;
+	
+	if (g_strcmp0(purple_protocol_get_id(purple_connection_get_protocol(pc)), ROCKETCHAT_PLUGIN_ID))
+		return 0;
+	
+	if (ya == NULL) {
+		ya = purple_connection_get_protocol_data(pc);
+	}
+	
+	room_id = purple_conversation_get_data(conv, "id");
+	if (room_id == NULL) {
+		if (PURPLE_IS_IM_CONVERSATION(conv)) {
+			room_id = g_hash_table_lookup(ya->one_to_ones_rev, purple_conversation_get_name(conv));
+		} else {
+			room_id = purple_conversation_get_name(conv);
+		}
+	}
+	g_return_val_if_fail(room_id, -1); //TODO create new conversation for this new person
+	
+	
+	//["{\"msg\":\"method\",\"method\":\"stream-notify-room\",\"params\":[\"eZqA2i4r76MHt4Y2nednpTpbaBg6qwjgR6/typing\",\"eionrobb\",true],\"id\":\"6\"}"]
+	data = json_object_new();
+	params = json_array_new();
+	
+	typing_id = g_strdup_printf("%s/typing", room_id);
+	json_array_add_string_element(params, typing_id);
+	g_free(typing_id);
+	
+	json_array_add_string_element(params, ya->self_user);
+	if (state == PURPLE_IM_TYPING) {
+		json_array_add_boolean_element(params, TRUE);
+	} else {
+		json_array_add_boolean_element(params, FALSE);
+	}
+	
+	json_object_set_string_member(data, "msg", "method");
+	json_object_set_string_member(data, "method", "stream-notify-room");
+	json_object_set_array_member(data, "params", params);
+	json_object_set_string_member(data, "id", rc_get_next_id_str(ya));
+	
+	rc_socket_write_json(ya, data);
+	
+	return 10;
+}
+
+static guint
+rc_send_typing(PurpleConnection *pc, const gchar *who, PurpleIMTypingState state)
+{
+	PurpleConversation *conv;
+	
+	conv = PURPLE_CONVERSATION(purple_conversations_find_im_with_account(who, purple_connection_get_account(pc)));
+	g_return_val_if_fail(conv, -1);
+	
+	return rc_conv_send_typing(conv, state, NULL);
 }
 
 static gint
@@ -1686,17 +1875,41 @@ static void
 rc_created_direct_message(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
 {
 	JsonObject *result = json_node_get_object(node);
+	const gchar *room_id = json_object_get_string_member(result, "rid");
 	PurpleBuddy *buddy = user_data;
 	
 	if (buddy != NULL) {
 		const gchar *who = purple_buddy_get_name(buddy);
-		const gchar *room_id = json_object_get_string_member(result, "rid");
 		
 		g_hash_table_replace(ya->one_to_ones, g_strdup(room_id), g_strdup(who));
 		g_hash_table_replace(ya->one_to_ones_rev, g_strdup(who), g_strdup(room_id));
 	
 		purple_blist_node_set_string(PURPLE_BLIST_NODE(buddy), "room_id", room_id);
 	}
+	
+	rc_join_room(ya, room_id);
+}
+
+static void
+rc_created_direct_message_send(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
+{
+	PurpleMessage *msg = user_data;
+	JsonObject *result = json_node_get_object(node);
+	const gchar *who = purple_message_get_recipient(msg);
+	const gchar *message = purple_message_get_contents(msg);
+	const gchar *room_id = json_object_get_string_member(result, "rid");
+	PurpleBuddy *buddy = purple_blist_find_buddy(ya->account, who);
+	
+	g_hash_table_replace(ya->one_to_ones, g_strdup(room_id), g_strdup(who));
+	g_hash_table_replace(ya->one_to_ones_rev, g_strdup(who), g_strdup(room_id));
+
+	if (buddy != NULL) {
+		purple_blist_node_set_string(PURPLE_BLIST_NODE(buddy), "room_id", room_id);
+	}
+	
+	rc_join_room(ya, room_id);
+	
+	rc_conversation_send_message(ya, room_id, message);
 }
 
 static int
@@ -1713,6 +1926,28 @@ const gchar *who, const gchar *message, PurpleMessageFlags flags)
 
 	RocketChatAccount *ya = purple_connection_get_protocol_data(pc);
 	gchar *room_id = g_hash_table_lookup(ya->one_to_ones_rev, who);
+	
+	if (room_id == NULL) {
+		//["{\"msg\":\"method\",\"method\":\"createDirectMessage\",\"params\":[\"hubot\"],\"id\":\"28\"}"]
+		JsonObject *data;
+		JsonArray *params;
+#if !PURPLE_VERSION_CHECK(3, 0, 0)
+		PurpleMessage *msg = purple_message_new_outgoing(who, message, flags);
+#endif
+		
+		data = json_object_new();
+		params = json_array_new();
+		
+		json_array_add_string_element(params, who);
+		
+		json_object_set_string_member(data, "msg", "method");
+		json_object_set_string_member(data, "method", "createDirectMessage");
+		json_object_set_array_member(data, "params", params);
+		json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_created_direct_message_send, msg));
+	
+		rc_socket_write_json(ya, data);
+		return 1;
+	}
 	
 	return rc_conversation_send_message(ya, room_id, message);
 }
@@ -1774,6 +2009,8 @@ rc_add_buddy(PurpleConnection *pc, PurpleBuddy *buddy, PurpleGroup *group
 	json_object_set_string_member(data, "method", "createDirectMessage");
 	json_object_set_array_member(data, "params", params);
 	json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_created_direct_message, buddy));
+	
+	rc_socket_write_json(ya, data);
 	
 	return;
 }
@@ -1900,6 +2137,7 @@ plugin_init(PurplePlugin *plugin)
 	prpl_info->login = rc_login;
 	prpl_info->close = rc_close;
 	prpl_info->send_im = rc_send_im;
+	prpl_info->send_typing = rc_send_typing;
 	// prpl_info->add_deny = rc_block_user;
 	// prpl_info->rem_deny = rc_unblock_user;
 	prpl_info->join_chat = rc_join_chat;
@@ -1999,6 +2237,7 @@ static void
 rc_protocol_im_iface_init(PurpleProtocolIMIface *prpl_info)
 {
 	prpl_info->send = rc_send_im;
+	prpl_info->send_typing = rc_send_typing;
 }
 
 static void 
