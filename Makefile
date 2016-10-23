@@ -74,7 +74,7 @@ PURPLE_C_FILES := librocketchat.c $(C_FILES)
 
 
 
-.PHONY:	all install FAILNOPURPLE clean
+.PHONY:	all install FAILNOPURPLE clean install-icons
 
 all: $(ROCKETCHAT_TARGET)
 
@@ -90,9 +90,17 @@ librocketchat.dll: $(PURPLE_C_FILES) $(PURPLE_COMPAT_FILES)
 librocketchat3.dll: $(PURPLE_C_FILES) $(PURPLE_COMPAT_FILES)
 	$(WIN32_CC) -shared -o $@ $^ $(WIN32_PIDGIN3_CFLAGS) $(WIN32_PIDGIN3_LDFLAGS)
 
-install: $(ROCKETCHAT_TARGET) 
+install: $(ROCKETCHAT_TARGET) install-icons
 	mkdir -p $(ROCKETCHAT_DEST)
 	install -p $(ROCKETCHAT_TARGET) $(ROCKETCHAT_DEST)
+
+install-icons: rocketchat16.png rocketchat22.png rocketchat48.png
+	mkdir -p $(HANGOUTS_ICONS_DEST)/16
+	mkdir -p $(HANGOUTS_ICONS_DEST)/22
+	mkdir -p $(HANGOUTS_ICONS_DEST)/48
+	install rocketchat16.png $(HANGOUTS_ICONS_DEST)/16/rocketchat.png
+	install rocketchat22.png $(HANGOUTS_ICONS_DEST)/22/rocketchat.png
+	install rocketchat48.png $(HANGOUTS_ICONS_DEST)/48/rocketchat.png
 
 FAILNOPURPLE:
 	echo "You need libpurple development headers installed to be able to compile this plugin"
