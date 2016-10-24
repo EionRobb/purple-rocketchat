@@ -574,6 +574,15 @@ void rc_block_user(PurpleConnection *pc, const char *who);
 static void rc_socket_write_json(RocketChatAccount *ya, JsonObject *data);
 static GHashTable *rc_chat_info_defaults(PurpleConnection *pc, const char *chatname);
 
+static void
+rc_login_response(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
+{
+	JsonObject *response = json_node_get_object(node);
+	
+	if (json_object_has_member(response, "token")) {
+		ya->session_token = g_strdup(json_object_get_string_member(response, "token"));
+	}//a["{\"msg\":\"result\",\"id\":\"1\",\"result\":{\"id\":\"hZKg86uJavE6jYLya\",\"token\":\"OvG63dE9x79demZnrmBv4vnYYlGMMB-wRKVWFcTxQbv\",\"tokenExpires\":{\"$date\":1485062242977}}}"]
+}
 
 static void
 rc_account_connected(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
@@ -594,8 +603,6 @@ rc_account_connected(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
 	
 	rc_socket_write_json(ya, data);
 	
-	purple_connection_set_state(ya->pc, PURPLE_CONNECTION_CONNECTED);
-	
 	// Subscribe to all direct messages rooms
 	{
 		GList *l, *dm_room_ids = g_hash_table_get_keys(ya->one_to_ones);
@@ -604,6 +611,43 @@ rc_account_connected(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
 		}
 		g_list_free(dm_room_ids);
 	}
+	
+	if (ya->self_user) {
+		const gchar *subs[] = {"notification", "rooms-changed", "subscriptions-changed", "otr", NULL};
+		guint i;
+		const gchar *self_id = g_hash_table_lookup(ya->usernames_to_ids, ya->self_user);
+		JsonArray *params;
+		gchar *param_id;
+		
+	//["{\"msg\":\"sub\",\"id\":\"j3rDKZiswk48oD3xq\",\"name\":\"stream-notify-user\",\"params\":[\"hZKg86uJavE6jYLya/notification\",false]}"]
+	//["{\"msg\":\"sub\",\"id\":\"BhQGCDSHbs2K8b6Qo\",\"name\":\"stream-notify-user\",\"params\":[\"oAKZSpTPTQHbp6nBD/rooms-changed\",false]}"]
+	//["{\"msg\":\"sub\",\"id\":\"2wA7uGgSRcw67DsqW\",\"name\":\"stream-notify-user\",\"params\":[\"oAKZSpTPTQHbp6nBD/subscriptions-changed\",false]}"]
+	//["{\"msg\":\"sub\",\"id\":\"d7R5u6pCkLKPfxFa7\",\"name\":\"stream-notify-user\",\"params\":[\"oAKZSpTPTQHbp6nBD/otr\",false]}"]
+	//sign up to notifications
+		for (i = 0; subs[i]; i++) {
+			data = json_object_new();
+			params = json_array_new();
+			
+			id = g_strdup_printf("%012XFFFF", g_random_int());
+			json_object_set_string_member(data, "id", id);
+			g_free(id);
+			
+			json_object_set_string_member(data, "msg", "sub");
+			json_object_set_string_member(data, "name", "stream-notify-user");
+			
+			param_id = g_strdup_printf("%s/%s", self_id, subs[i]);
+			json_array_add_string_element(params, param_id);
+			g_free(param_id);
+			
+			json_array_add_boolean_element(params, FALSE);
+			
+			json_object_set_array_member(data, "params", params);
+			
+			rc_socket_write_json(ya, data);
+		}
+	}
+	
+	purple_connection_set_state(ya->pc, PURPLE_CONNECTION_CONNECTED);
 }
 	
 static void
@@ -644,13 +688,15 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 				purple_protocol_got_user_status(ya->account, username, status, NULL);
 			}
 			
+			g_hash_table_replace(ya->usernames_to_ids, g_strdup(username), g_strdup(user_id));
+			g_hash_table_replace(ya->ids_to_usernames, g_strdup(user_id), g_strdup(username));
+			
 			if (!ya->self_user) {
 				// The first user added to the collection is us
 				ya->self_user = g_strdup(username);
+				
+				rc_account_connected(ya, NULL, NULL);
 			}
-			
-			g_hash_table_replace(ya->usernames_to_ids, g_strdup(username), g_strdup(user_id));
-			g_hash_table_replace(ya->ids_to_usernames, g_strdup(user_id), g_strdup(username));
 		}
 	} else if (purple_strequal(msg, "changed")) {
 		const gchar *collection = json_object_get_string_member(obj, "collection");
@@ -754,42 +800,122 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 				const gchar *username = json_array_get_string_element(args, 0);
 				gboolean is_typing = json_array_get_boolean_element(args, 1);
 				
-				if (g_hash_table_contains(ya->group_chats, room_id)) {
-					// This is a group conversation
-					PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_id, ya->account);
-					if (chatconv != NULL) {
-						PurpleChatUser *cb = purple_chat_conversation_find_user(chatconv, username);
-						PurpleChatUserFlags cbflags;
+				if (!purple_strequal(username, ya->self_user)) {
+					if (g_hash_table_contains(ya->group_chats, room_id)) {
+						// This is a group conversation
+						PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_id, ya->account);
+						if (chatconv != NULL) {
+							PurpleChatUser *cb = purple_chat_conversation_find_user(chatconv, username);
+							PurpleChatUserFlags cbflags;
 
-						if (cb == NULL) {
-							// Getting notified about a buddy we dont know about yet
-							//TODO add buddy
-							return;
+							if (cb == NULL) {
+								// Getting notified about a buddy we dont know about yet
+								//TODO add buddy
+								return;
+							}
+							cbflags = purple_chat_user_get_flags(cb);
+							
+							if (is_typing)
+								cbflags |= PURPLE_CHAT_USER_TYPING;
+							else
+								cbflags &= ~PURPLE_CHAT_USER_TYPING;
+							
+							purple_chat_user_set_flags(cb, cbflags);
 						}
-						cbflags = purple_chat_user_get_flags(cb);
+					} else {
+						PurpleIMTypingState typing_state;
 						
-						if (is_typing)
-							cbflags |= PURPLE_CHAT_USER_TYPING;
-						else
-							cbflags &= ~PURPLE_CHAT_USER_TYPING;
+						if (is_typing) {
+							typing_state = PURPLE_IM_TYPING;
+						} else {
+							typing_state = PURPLE_IM_NOT_TYPING;
+						}
+						purple_serv_got_typing(ya->pc, username, 15, typing_state);
 						
-						purple_chat_user_set_flags(cb, cbflags);
+					}
+				}
+			}
+			g_strfreev(event_split);
+		} else if (purple_strequal(collection, "stream-notify-user")) {
+			JsonObject *fields = json_object_get_object_member(obj, "fields");
+			const gchar *eventName = json_object_get_string_member(fields, "eventName");
+			JsonArray *args = json_object_get_array_member(fields, "args");
+			gchar **event_split;
+			
+			event_split = g_strsplit(eventName, "/", 2);	
+			if (purple_strequal(event_split[1], "rooms-changed")) {
+				// New chat started
+				//a["{\"msg\":\"changed\",\"collection\":\"stream-notify-user\",\"id\":\"id\",\"fields\":{\"eventName\":\"hZKg86uJavE6jYLya/rooms-changed\",\"args\":[\"inserted\",{\"_id\":\"JoxbibGnXizRb4ef4hZKg86uJavE6jYLya\",\"t\":\"d\"}]}}"]
+				
+			} else if (purple_strequal(event_split[1], "subscriptions-changed")) {
+				// Joined a chat			//a["{\"msg\":\"changed\",\"collection\":\"stream-notify-user\",\"id\":\"id\",\"fields\":{\"eventName\":\"oAKZSpTPTQHbp6nBD/subscriptions-changed\",\"args\":[\"inserted\",{\"t\":\"d\",\"ts\":{\"$date\":1477264898460},\"ls\":{\"$date\":1477264898460},\"name\":\"eionrobb\",\"rid\":\"hZKg86uJavE6jYLyaoAKZSpTPTQHbp6nBD\",\"u\":{\"_id\":\"oAKZSpTPTQHbp6nBD\",\"username\":\"eiontest\"},\"open\":true,\"alert\":false,\"unread\":0,\"_updatedAt\":{\"$date\":1477264898482},\"_id\":\"seeiaYbHTmFzbZKPx\"}]}}"]
+				JsonObject *room_info = json_array_get_object_element(args, 1);
+				const gchar *name = json_object_get_string_member(room_info, "name");
+				const gchar *room_id = json_object_get_string_member(room_info, "rid");
+				const gchar *room_type = json_object_get_string_member(room_info, "t");
+				gboolean new_room = FALSE;
+				
+				if (*room_type == 'd') {
+					// Direct message
+					if (!g_hash_table_contains(ya->one_to_ones, room_id)) {
+						g_hash_table_replace(ya->one_to_ones, g_strdup(room_id), g_strdup(name));
+						g_hash_table_replace(ya->one_to_ones_rev, g_strdup(name), g_strdup(room_id));
+						
+						new_room = TRUE;
 					}
 				} else {
-					PurpleIMTypingState typing_state;
-					
-					if (is_typing) {
-						typing_state = PURPLE_IM_TYPING;
-					} else {
-						typing_state = PURPLE_IM_NOT_TYPING;
+					// Group chat
+					if (!g_hash_table_contains(ya->group_chats, room_id)) {
+						g_hash_table_replace(ya->group_chats, g_strdup(room_id), NULL);
+						
+						new_room = TRUE;
 					}
-					purple_serv_got_typing(ya->pc, username, 15, typing_state);
 					
+					// chatconv = purple_serv_got_joined_chat(ya->pc, g_str_hash(room_id), room_id);
+					// purple_conversation_set_data(PURPLE_CONVERSATION(chatconv), "id", g_strdup(room_id));
+				}
+				
+				if (new_room == TRUE) {
+					rc_join_room(ya, room_id);
+				}
+			} else if (purple_strequal(event_split[1], "notification")) {
+				// new notification
+				//TODO do we use this instead of the stream-room-messages
+				//a["{\"msg\":\"changed\",\"collection\":\"stream-notify-user\",\"id\":\"id\",\"fields\":{\"eventName\":\"hZKg86uJavE6jYLya/notification\",\"args\":[{\"title\":\"@eiontest\",\"text\":\"5\",\"payload\":{\"_id\":\"xSJtpP7JWT6S3AgXR\",\"rid\":\"hZKg86uJavE6jYLyaoAKZSpTPTQHbp6nBD\",\"sender\":{\"_id\":\"oAKZSpTPTQHbp6nBD\",\"username\":\"eiontest\"},\"type\":\"d\"}}]}}"]
+				JsonObject *event = json_array_get_object_element(args, 0);
+				JsonObject *payload = json_object_get_object_member(event, "payload");
+				const gchar *username = json_object_get_string_member(payload, "username");
+				const gchar *type = json_object_get_string_member(payload, "type");
+				//const gchar *rid = json_object_get_string_member(payload, "rid");
+				const gchar *msg_text = json_object_get_string_member(event, "text");
+				
+				if (*type == 'd') {
+					if (!purple_strequal(ya->self_user, username)) {
+						gchar *message = purple_markup_escape_text(msg_text, -1);
+						purple_serv_got_im(ya->pc, username, message, PURPLE_MESSAGE_RECV, time(NULL));
+						g_free(message);
+					}
 				}
 			}
 			g_strfreev(event_split);
 			
 		}
+	} else if (purple_strequal(msg, "removed")) {
+		const gchar *collection = json_object_get_string_member(obj, "collection");
+		
+		if (purple_strequal(collection, "users")) {
+			//a["{\"msg\":\"removed\",\"collection\":\"users\",\"id\":\"qYbdBFhcQyiyLx7z9\"}"]
+			const gchar *user_id = json_object_get_string_member(obj, "id");
+			const gchar *username = g_hash_table_lookup(ya->ids_to_usernames, user_id);
+			
+			if (username != NULL) {
+				purple_protocol_got_user_status(ya->account, username, "offline", NULL);
+			}
+			
+			g_hash_table_remove(ya->usernames_to_ids, username);
+			g_hash_table_remove(ya->ids_to_usernames, user_id);
+		}
+		
 	} else if (purple_strequal(msg, "connected")) {
 	
 		JsonArray *params = json_array_new();
@@ -798,14 +924,20 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 		JsonObject *password = json_object_new();
 		gchar *digest;
 		
-		json_object_set_string_member(user, "email", ya->username);
-		digest = g_compute_checksum_for_string(G_CHECKSUM_SHA256, purple_account_get_password(ya->account), -1);
-		json_object_set_string_member(password, "digest", digest);
-		json_object_set_string_member(password, "algorithm", "sha-256");
-		g_free(digest);
-		
-		json_object_set_object_member(param, "user", user);
-		json_object_set_object_member(param, "password", password);
+		if (ya->session_token) {
+			// Continue an existing session
+			json_object_set_string_member(param, "resume", ya->session_token);
+		} else {
+			// Start a brand new login
+			json_object_set_string_member(user, "email", ya->username);
+			digest = g_compute_checksum_for_string(G_CHECKSUM_SHA256, purple_account_get_password(ya->account), -1);
+			json_object_set_string_member(password, "digest", digest);
+			json_object_set_string_member(password, "algorithm", "sha-256");
+			g_free(digest);
+			
+			json_object_set_object_member(param, "user", user);
+			json_object_set_object_member(param, "password", password);
+		}
 		
 		json_array_add_object_element(params, param);
 		
@@ -813,7 +945,7 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 		json_object_set_string_member(response, "msg", "method");
 		json_object_set_string_member(response, "method", "login");
 		json_object_set_array_member(response, "params", params);
-		json_object_set_string_member(response, "id", rc_get_next_id_str_callback(ya, rc_account_connected, NULL));
+		json_object_set_string_member(response, "id", rc_get_next_id_str_callback(ya, rc_login_response, NULL));
 		
 		
 	} else if (purple_strequal(msg, "result")) {
@@ -906,9 +1038,13 @@ rc_roomlist_get_list(PurpleConnection *pc)
 		json_object_set_array_member(data, "params", params);
 		json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_roomlist_got_list, roomlist));
 		
+		json_object_ref(data);
+		rc_socket_write_json(ya, data);
+		
+		// Send the same request again without the second parameter for older servers
+		json_array_remove_element(params, 1);
 		rc_socket_write_json(ya, data);
 	}
-	
 	
 	return roomlist;
 }
@@ -1345,7 +1481,7 @@ rc_socket_got_data(gpointer userdata, PurpleSslConnection *conn, PurpleInputCond
 				purple_ssl_read(conn, &ya->frame_len, 8);
 				ya->frame_len = GUINT64_FROM_BE(ya->frame_len);
 			}
-			purple_debug_info("rocketchat", "frame_len: %" G_GUINT64_FORMAT "\n", ya->frame_len);
+			//purple_debug_info("rocketchat", "frame_len: %" G_GUINT64_FORMAT "\n", ya->frame_len);
 			
 			ya->frame = g_new0(gchar, ya->frame_len + 1);
 			ya->frame_len_progress = 0;
@@ -1638,8 +1774,10 @@ rc_join_room(RocketChatAccount *ya, const gchar *room_id)
 	//["{\"msg\":\"sub\",\"id\":\"wvf3panWk2qkFyPEk\",\"name\":\"stream-notify-room\",\"params\":[\"GENERAL/typing\",false]}"]
 	//["{\"msg\":\"method\",\"method\":\"getRoomRoles\",\"params\":[\"GENERAL\"],\"id\":\"15\"}"]
 	//["{\"msg\":\"method\",\"method\":\"getUsersOfRoom\",\"params\":[\"GENERAL\",true],\"id\":\"15\"}"]
+	//["{\"msg\":\"method\",\"method\":\"loadHistory\",\"params\":[\"GENERAL\",null,50,{\"$date\":1477203134888}],\"id\":\"5\"}"]
 	JsonObject *data = json_object_new();
 	JsonArray *params = json_array_new();
+	JsonObject *date;
 	gchar *id;
 	gchar *sub_id;
 	
@@ -1705,6 +1843,26 @@ rc_join_room(RocketChatAccount *ya, const gchar *room_id)
 	json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_got_users_of_room, g_strdup(room_id)));
 	
 	rc_socket_write_json(ya, data);
+	
+	// Download old messages
+	//blistnode
+	data = json_object_new();
+	params = json_array_new();
+	
+	json_array_add_string_element(params, room_id);
+	json_array_add_null_element(params);
+	json_array_add_int_element(params, 50); // Number of messages
+	date = json_object_new();
+	json_object_set_int_member(date, "$date", 1477203134888); //TODO get the last message timestamp for this conversation
+	json_array_add_object_element(params, date);
+	
+	json_object_set_string_member(data, "msg", "method");
+	json_object_set_string_member(data, "method", "loadHistory");
+	json_object_set_array_member(data, "params", params);
+	//json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_got_history_of_room, g_strdup(room_id)));
+	
+	//rc_socket_write_json(ya, data); //TODO
+	
 }
 
 static void
@@ -1818,7 +1976,7 @@ rc_conversation_send_message(RocketChatAccount *ya, const gchar *rid, const gcha
 	
 	_id = g_strdup_printf("%012XFFFF", g_random_int());
 	json_object_set_string_member(param, "_id", _id);
-	g_free(_id);
+	g_hash_table_insert(ya->sent_message_ids, _id, _id);
 	
 	json_object_set_string_member(param, "rid", rid);
 	
