@@ -577,11 +577,19 @@ static GHashTable *rc_chat_info_defaults(PurpleConnection *pc, const char *chatn
 static void
 rc_login_response(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
 {
-	JsonObject *response = json_node_get_object(node);
+	JsonObject *response;
+
+	if (node == NULL) {
+		purple_connection_error(ya->pc, PURPLE_CONNECTION_ERROR_AUTHENTICATION_FAILED, "Bad username/password");
+		return;
+	}
+	
+	response = json_node_get_object(node);
 	
 	if (json_object_has_member(response, "token")) {
 		ya->session_token = g_strdup(json_object_get_string_member(response, "token"));
 	}//a["{\"msg\":\"result\",\"id\":\"1\",\"result\":{\"id\":\"hZKg86uJavE6jYLya\",\"token\":\"OvG63dE9x79demZnrmBv4vnYYlGMMB-wRKVWFcTxQbv\",\"tokenExpires\":{\"$date\":1485062242977}}}"]
+	//a["{\"msg\":\"result\",\"id\":\"5\",\"error\":{\"error\":403,\"reason\":\"User has no password set\",\"message\":\"User has no password set [403]\",\"errorType\":\"Meteor.Error\"}}"]
 }
 
 static void
@@ -929,7 +937,11 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 			json_object_set_string_member(param, "resume", ya->session_token);
 		} else {
 			// Start a brand new login
-			json_object_set_string_member(user, "email", ya->username);
+			if (strchr(ya->username, '@')) {
+				json_object_set_string_member(user, "email", ya->username);
+			} else {
+				json_object_set_string_member(user, "username", ya->username);
+			}
 			digest = g_compute_checksum_for_string(G_CHECKSUM_SHA256, purple_account_get_password(ya->account), -1);
 			json_object_set_string_member(password, "digest", digest);
 			json_object_set_string_member(password, "algorithm", "sha-256");
