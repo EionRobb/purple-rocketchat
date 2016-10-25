@@ -942,7 +942,7 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 			} else {
 				json_object_set_string_member(user, "username", ya->username);
 			}
-			digest = g_compute_checksum_for_string(G_CHECKSUM_SHA256, purple_account_get_password(ya->account), -1);
+			digest = g_compute_checksum_for_string(G_CHECKSUM_SHA256, purple_connection_get_password(ya->pc), -1);
 			json_object_set_string_member(password, "digest", digest);
 			json_object_set_string_member(password, "algorithm", "sha-256");
 			g_free(digest);
@@ -2452,7 +2452,7 @@ PURPLE_DEFINE_TYPE_EXTENDED(
 	                                  rc_protocol_server_iface_init)
 
 	PURPLE_IMPLEMENT_INTERFACE_STATIC(PURPLE_TYPE_PROTOCOL_ROOMLIST_IFACE,
-	                                  hangouts_protocol_roomlist_iface_init)
+	                                  rc_protocol_roomlist_iface_init)
 
 );
 
