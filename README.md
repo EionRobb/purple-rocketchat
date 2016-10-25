@@ -21,3 +21,6 @@ sudo apt-get install libpurple-dev libjson-glib-dev libglib2.0-dev mercurial mak
 hg clone https://bitbucket.org/EionRobb/purple-rocketchat/ && cd purple-rocketchat;
 make && sudo make install
 ```
+
+## Windows Builds ##
+Windows nightly builds at https://eion.robbmob.com/librocketchat.dll
