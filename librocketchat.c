@@ -741,7 +741,7 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message, JsonObject *
 		
 		// check we didn't send this
 		if (msg_flags == PURPLE_MESSAGE_RECV || !g_hash_table_remove(ya->sent_message_ids, _id)) {
-			if ((roomType == NULL && g_hash_table_contains(ya->group_chats, rid)) || *roomType != 'd') {
+			if ((roomType != NULL && *roomType != 'd') || g_hash_table_contains(ya->group_chats, rid)) {
 				// Group chat message
 				purple_serv_got_chat_in(ya->pc, g_str_hash(rid), username, msg_flags, message, timestamp);
 			} else {
