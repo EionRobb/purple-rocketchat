@@ -463,9 +463,19 @@ gpointer user_data, const gchar *url_text, gsize len, const gchar *error_message
 	
 	if (!json_parser_load_from_data(parser, body, body_len, NULL))
 	{
-		purple_debug_error("rocketchat", "Error parsing response: %s\n", body);
+		//purple_debug_error("rocketchat", "Error parsing response: %s\n", body);
 		if (conn->callback) {
-			conn->callback(conn->ya, NULL, conn->user_data);
+			JsonNode *dummy_node = json_node_new(JSON_NODE_OBJECT);
+			JsonObject *dummy_object = json_object_new();
+			
+			json_node_set_object(dummy_node, dummy_object);
+			json_object_set_string_member(dummy_object, "body", body);
+			json_object_set_int_member(dummy_object, "len", body_len);
+			
+			conn->callback(conn->ya, dummy_node, conn->user_data);
+			
+			json_node_free(dummy_node);
+			json_object_unref(dummy_object);
 		}
 	} else {
 		JsonNode *root = json_parser_get_root(parser);
@@ -486,6 +496,7 @@ rc_fetch_url(RocketChatAccount *ya, const gchar *url, const gchar *postdata, Roc
 	PurpleAccount *account;
 	RocketChatProxyConnection *conn;
 	gchar *cookies;
+	PurpleHttpConnection *http_conn;
 	
 	account = ya->account;
 	if (purple_account_is_disconnected(account)) return;
@@ -517,13 +528,13 @@ rc_fetch_url(RocketChatAccount *ya, const gchar *url, const gchar *postdata, Roc
 		purple_http_request_set_contents(request, postdata, -1);
 	}
 	
-	purple_http_request(ya->pc, request, rc_response_callback, conn);
+	http_conn = purple_http_request(ya->pc, request, rc_response_callback, conn);
 	purple_http_request_unref(request);
 
-	// TODO: add something to ya->http_conns
+	if (http_conn != NULL)
+		ya->http_conns = g_slist_prepend(ya->http_conns, http_conn);
 
 #else
-	PurpleHttpConnection *http_conn;
 	GString *headers;
 	gchar *host = NULL, *path = NULL, *user = NULL, *password = NULL;
 	int port;
@@ -812,14 +823,16 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 				purple_protocol_got_user_status(ya->account, username, status, NULL);
 			}
 			
-			g_hash_table_replace(ya->usernames_to_ids, g_strdup(username), g_strdup(user_id));
-			g_hash_table_replace(ya->ids_to_usernames, g_strdup(user_id), g_strdup(username));
-			
-			if (!ya->self_user) {
-				// The first user added to the collection is us
-				ya->self_user = g_strdup(username);
+			if (username != NULL) {
+				g_hash_table_replace(ya->usernames_to_ids, g_strdup(username), g_strdup(user_id));
+				g_hash_table_replace(ya->ids_to_usernames, g_strdup(user_id), g_strdup(username));
 				
-				rc_account_connected(ya, NULL, NULL);
+				if (!ya->self_user) {
+					// The first user added to the collection is us
+					ya->self_user = g_strdup(username);
+					
+					rc_account_connected(ya, NULL, NULL);
+				}
 			}
 		}
 	} else if (purple_strequal(msg, "changed")) {
@@ -2400,6 +2413,22 @@ const gchar *who, const gchar *message, PurpleMessageFlags flags)
 // }
 
 static void
+rc_got_avatar(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
+{
+	JsonObject *response = json_node_get_object(node);
+	PurpleBuddy *buddy = user_data;
+	const gchar *response_str;
+	gsize response_len;
+	gpointer response_dup;
+	
+	response_str = json_object_get_string_member(response, "body");
+	response_len = json_object_get_int_member(response, "len");
+	response_dup = g_memdup(response_str, response_len);
+	
+	purple_buddy_icons_set_for_user(ya->account, purple_buddy_get_name(buddy), response_dup, response_len, NULL);
+}
+
+static void
 rc_add_buddy(PurpleConnection *pc, PurpleBuddy *buddy, PurpleGroup *group
 #if PURPLE_VERSION_CHECK(3, 0, 0)
 , const char *message
@@ -2410,6 +2439,7 @@ rc_add_buddy(PurpleConnection *pc, PurpleBuddy *buddy, PurpleGroup *group
 	JsonObject *data;
 	JsonArray *params;
 	const gchar *buddy_name = purple_buddy_get_name(buddy);
+	gchar *avatar_url;
 	
 	//["{\"msg\":\"method\",\"method\":\"createDirectMessage\",\"params\":[\"1test\"],\"id\":\"28\"}"]
 	
@@ -2426,6 +2456,27 @@ rc_add_buddy(PurpleConnection *pc, PurpleBuddy *buddy, PurpleGroup *group
 	json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_created_direct_message, buddy));
 	
 	rc_socket_write_json(ya, data);
+	
+	// Grab all the user data
+	//["{\"msg\":\"sub\",\"id\":\"rr9T9NEee3JubKWGi\",\"name\":\"fullUserData\",\"params\":[\"eionrobb\",1]}"]
+	data = json_object_new();
+	params = json_array_new();
+	
+	json_array_add_string_element(params, buddy_name);
+	json_array_add_int_element(params, 1);
+	
+	json_object_set_string_member(data, "msg", "sub");
+	json_object_set_string_member(data, "id", rc_get_next_id_str(ya));
+	json_object_set_string_member(data, "name", "fullUserData");
+	json_object_set_array_member(data, "params", params);
+	
+	rc_socket_write_json(ya, data);
+	
+	
+	//avatar at https://{server}/avatar/{username}.jpg?_dc=0
+	avatar_url = g_strdup_printf("https://%s/avatar/%s.jpg?_dc=0", ya->server, purple_url_encode(buddy_name));
+	rc_fetch_url(ya, avatar_url, NULL, rc_got_avatar, buddy);
+	g_free(avatar_url);
 	
 	return;
 }
