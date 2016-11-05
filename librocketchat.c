@@ -271,6 +271,63 @@ typedef struct {
 
 
 
+//#include <mkdio.h>
+int mkd_line(char *, int, char **, int);
+
+#define MKD_NOLINKS	0x00000001	/* don't do link processing, block <a> tags  */
+#define MKD_NOIMAGE	0x00000002	/* don't do image processing, block <img> */
+#define MKD_NOPANTS	0x00000004	/* don't run smartypants() */
+#define MKD_NOHTML	0x00000008	/* don't allow raw html through AT ALL */
+#define MKD_STRICT	0x00000010	/* disable SUPERSCRIPT, RELAXED_EMPHASIS */
+#define MKD_TAGTEXT	0x00000020	/* process text inside an html tag; no
+					 * <em>, no <bold>, no html or [] expansion */
+#define MKD_NO_EXT	0x00000040	/* don't allow pseudo-protocols */
+#define MKD_NOEXT	MKD_NO_EXT	/* ^^^ (aliased for user convenience) */
+#define MKD_CDATA	0x00000080	/* generate code for xml ![CDATA[...]] */
+#define MKD_NOSUPERSCRIPT 0x00000100	/* no A^B */
+#define MKD_NORELAXED	0x00000200	/* emphasis happens /everywhere/ */
+#define MKD_NOTABLES	0x00000400	/* disallow tables */
+#define MKD_NOSTRIKETHROUGH 0x00000800	/* forbid ~~strikethrough~~ */
+#define MKD_TOC		0x00001000	/* do table-of-contents processing */
+#define MKD_1_COMPAT	0x00002000	/* compatibility with MarkdownTest_1.0 */
+#define MKD_AUTOLINK	0x00004000	/* make http://foo.com link even without <>s */
+#define MKD_SAFELINK	0x00008000	/* paranoid check for link protocol */
+#define MKD_NOHEADER	0x00010000	/* don't process header blocks */
+#define MKD_TABSTOP	0x00020000	/* expand tabs to 4 spaces */
+#define MKD_NODIVQUOTE	0x00040000	/* forbid >%class% blocks */
+#define MKD_NOALPHALIST	0x00080000	/* forbid alphabetic lists */
+#define MKD_NODLIST	0x00100000	/* forbid definition lists */
+#define MKD_EXTRA_FOOTNOTE 0x00200000	/* enable markdown extra-style footnotes */
+#define MKD_NOSTYLE	0x00400000	/* don't extract <style> blocks */
+#define MKD_NODLDISCOUNT 0x00800000	/* disable discount-style definition lists */
+#define	MKD_DLEXTRA	0x01000000	/* enable extra-style definition lists */
+#define MKD_FENCEDCODE	0x02000000	/* enabled fenced code blocks */
+#define MKD_IDANCHOR	0x04000000	/* use id= anchors for TOC links */
+#define MKD_GITHUBTAGS	0x08000000	/* allow dash and underscore in element names */
+#define MKD_URLENCODEDANCHOR 0x10000000 /* urlencode non-identifier chars instead of replacing with dots */
+#define MKD_LATEX	0x40000000	/* handle embedded LaTeX escapes */
+
+#define MKD_EMBED	MKD_NOLINKS|MKD_NOIMAGE|MKD_TAGTEXT
+
+static gchar *
+rc_markdown_to_html(const gchar *markdown)
+{
+	static char *markdown_str = NULL;
+	int markdown_len;
+	int flags = MKD_NOPANTS | MKD_NOHEADER | MKD_NODIVQUOTE | MKD_NODLIST;
+	
+	if (markdown_str != NULL) {
+		free(markdown_str);
+	}
+	
+	markdown_len = mkd_line((char *)markdown, strlen(markdown), &markdown_str, flags);
+
+	if (markdown_len < 0) {
+		return NULL;
+	}
+	
+	return g_strndup(markdown_str, markdown_len);
+}
 
 
 // static gchar *
@@ -748,7 +805,7 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message, JsonObject *
 			purple_chat_conversation_remove_user(chatconv, username, NULL);
 		}
 	} else {
-		gchar *message = purple_markup_escape_text(msg_text, -1);
+		gchar *message = rc_markdown_to_html(msg_text);
 		
 		// check we didn't send this
 		if (msg_flags == PURPLE_MESSAGE_RECV || !g_hash_table_remove(ya->sent_message_ids, _id)) {
@@ -2090,7 +2147,7 @@ rc_join_chat(PurpleConnection *pc, GHashTable *chatdata)
 	RocketChatAccount *ya = purple_connection_get_protocol_data(pc);
 	gchar *id;
 	gchar *name;
-	PurpleChatConversation *chatconv;
+	PurpleChatConversation *chatconv = NULL;
 	
 	id = (gchar *) g_hash_table_lookup(chatdata, "id");
 	name = (gchar *) g_hash_table_lookup(chatdata, "name");
@@ -2322,15 +2379,28 @@ static void
 rc_created_direct_message_send(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
 {
 	PurpleMessage *msg = user_data;
-	JsonObject *result = json_node_get_object(node);
-	const gchar *who = purple_message_get_recipient(msg);
-	const gchar *message = purple_message_get_contents(msg);
-	const gchar *room_id = json_object_get_string_member(result, "rid");
-	PurpleBuddy *buddy = purple_blist_find_buddy(ya->account, who);
+	JsonObject *result;
+	const gchar *who;
+	const gchar *message;
+	const gchar *room_id;
+	PurpleBuddy *buddy;
 	
-	g_hash_table_replace(ya->one_to_ones, g_strdup(room_id), g_strdup(who));
-	g_hash_table_replace(ya->one_to_ones_rev, g_strdup(who), g_strdup(room_id));
-
+	if (node == NULL) {
+		//todo display error
+		return;
+	}
+	
+	result = json_node_get_object(node);
+	who = purple_message_get_recipient(msg);
+	message = purple_message_get_contents(msg);
+	room_id = json_object_get_string_member(result, "rid");
+	buddy = purple_blist_find_buddy(ya->account, who);
+	
+	if (room_id != NULL && who != NULL) {
+		g_hash_table_replace(ya->one_to_ones, g_strdup(room_id), g_strdup(who));
+		g_hash_table_replace(ya->one_to_ones_rev, g_strdup(who), g_strdup(room_id));
+	}
+	
 	if (buddy != NULL) {
 		purple_blist_node_set_string(PURPLE_BLIST_NODE(buddy), "room_id", room_id);
 	}
