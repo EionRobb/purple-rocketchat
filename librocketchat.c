@@ -1731,6 +1731,9 @@ rc_socket_failed(PurpleSslConnection *conn, PurpleSslErrorType errortype, gpoint
 static void
 rc_start_socket(RocketChatAccount *ya)
 {
+	gchar **server_split;
+	gint port = 443;
+	
 	//Reset all the old stuff
 	if (ya->websocket != NULL) {
 		purple_ssl_close(ya->websocket);
@@ -1743,7 +1746,13 @@ rc_start_socket(RocketChatAccount *ya)
 	ya->frame_len = 0;
 	ya->frames_since_reconnect = 0;
 
-	ya->websocket = purple_ssl_connect(ya->account, ya->server, 443, rc_socket_connected, rc_socket_failed, ya);
+	server_split = g_strsplit(ya->server, ":", 2);
+	if (server_split[1] != NULL) {
+		port = atoi(server_split[1]);
+	}
+	ya->websocket = purple_ssl_connect(ya->account, server_split[0], port, rc_socket_connected, rc_socket_failed, ya);
+	
+	g_strfreev(server_split);
 }
 
 
