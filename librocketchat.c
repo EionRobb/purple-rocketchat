@@ -914,7 +914,7 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 					// The first user added to the collection is us
 					ya->self_user = g_strdup(username);
 					
-					purple_connection_set_display_name(pc, ya->self_user);
+					purple_connection_set_display_name(ya->pc, ya->self_user);
 					rc_account_connected(ya, NULL, NULL);
 				}
 			}
