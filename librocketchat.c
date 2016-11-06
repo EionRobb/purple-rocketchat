@@ -1528,6 +1528,10 @@ rc_process_frame(RocketChatAccount *rca, const gchar *frame)
 			//JsonObject *message_object = json_node_get_object(root);
 			//TODO not sure
 			purple_debug_warning("rocketchat", "object type not handled\n");
+		} else if (frame_type == 'c') {
+			//JsonObject *message_object = json_node_get_object(root);
+			//TODO not sure
+			purple_debug_error("rocketchat", "server closed the connection\n");
 		} else {
 			//TODO is this going to happen?
 			purple_debug_error("rocketchat", "unknown frame type '%c'\n", frame_type);
@@ -2776,6 +2780,18 @@ rc_status_types(PurpleAccount *account)
 	return types;
 }
 
+static GHashTable *
+rc_get_account_text_table(PurpleAccount *unused)
+{
+	GHashTable *table;
+
+	table = g_hash_table_new(g_str_hash, g_str_equal);
+
+	g_hash_table_insert(table, "login_label", (gpointer)_("Email or Username..."));
+
+	return table;
+}
+
 static PurpleCmdRet
 rc_cmd_leave(PurpleConversation *conv, const gchar *cmd, gchar **args, gchar **error, void *data)
 {
@@ -2864,6 +2880,7 @@ plugin_init(PurplePlugin *plugin)
 	prpl_info->icon_spec.max_filesize = 0;
 	prpl_info->icon_spec.scale_rules = PURPLE_ICON_SCALE_DISPLAY;
 	
+	prpl_info->get_account_text_table = rc_get_account_text_table;
 	prpl_info->list_icon = rc_list_icon;
 	prpl_info->set_status = rc_set_status;
 	prpl_info->status_types = rc_status_types;
@@ -2998,6 +3015,12 @@ rc_protocol_server_iface_init(PurpleProtocolServerIface *prpl_info)
 }
 
 static void 
+rc_protocol_client_iface_init(PurpleProtocolClientIface *prpl_info)
+{
+	prpl_info->get_account_text_table = rc_get_account_text_table;
+}
+
+static void 
 rc_protocol_roomlist_iface_init(PurpleProtocolRoomlistIface *prpl_info)
 {
 	prpl_info->get_list = rc_roomlist_get_list;
@@ -3020,6 +3043,9 @@ PURPLE_DEFINE_TYPE_EXTENDED(
 
 	PURPLE_IMPLEMENT_INTERFACE_STATIC(PURPLE_TYPE_PROTOCOL_SERVER_IFACE,
 	                                  rc_protocol_server_iface_init)
+
+	PURPLE_IMPLEMENT_INTERFACE_STATIC(PURPLE_TYPE_PROTOCOL_CLIENT_IFACE,
+	                                  rc_protocol_client_iface_init)
 
 	PURPLE_IMPLEMENT_INTERFACE_STATIC(PURPLE_TYPE_PROTOCOL_ROOMLIST_IFACE,
 	                                  rc_protocol_roomlist_iface_init)
