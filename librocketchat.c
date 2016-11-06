@@ -128,6 +128,8 @@ g_str_insensitive_hash(gconstpointer v)
 #define purple_conversations_find_chat_with_account(id, account) \
 		PURPLE_CONV_CHAT(purple_find_conversation_with_account(PURPLE_CONV_TYPE_CHAT, id, account))
 #define purple_chat_conversation_has_left     purple_conv_chat_has_left
+#define PurpleConversationUpdateType          PurpleConvUpdateType
+#define PURPLE_CONVERSATION_UPDATE_UNSEEN     PURPLE_CONV_UPDATE_UNSEEN
 #define PURPLE_IS_IM_CONVERSATION(conv)       (purple_conversation_get_type(conv) == PURPLE_CONV_TYPE_IM)
 #define PURPLE_IS_CHAT_CONVERSATION(conv)     (purple_conversation_get_type(conv) == PURPLE_CONV_TYPE_CHAT)
 #define PURPLE_CONVERSATION(chatorim)         (chatorim == NULL ? NULL : chatorim->conv)
@@ -645,6 +647,8 @@ static void rc_join_room(RocketChatAccount *ya, const gchar *room_id);
 void rc_block_user(PurpleConnection *pc, const char *who);
 static void rc_socket_write_json(RocketChatAccount *ya, JsonObject *data);
 static GHashTable *rc_chat_info_defaults(PurpleConnection *pc, const char *chatname);
+static void rc_mark_room_messages_read(RocketChatAccount *ya, const gchar *room_id);
+static void rc_account_connected(RocketChatAccount *ya, JsonNode *node, gpointer user_data);
 
 static void
 rc_login_response(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
@@ -820,6 +824,11 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message, JsonObject *
 						g_hash_table_replace(ya->one_to_ones, g_strdup(rid), g_strdup(username));
 						g_hash_table_replace(ya->one_to_ones_rev, g_strdup(username), g_strdup(rid));
 					}
+					
+					if (purple_conversation_has_focus(PURPLE_CONVERSATION(purple_conversations_find_im_with_account(username, ya->account)))) {
+						rc_mark_room_messages_read(ya, rid);
+					}
+					
 				} else {
 					const gchar *other_user = g_hash_table_lookup(ya->one_to_ones, rid);
 					// TODO null check
@@ -1277,6 +1286,8 @@ rc_build_groups_from_blist(RocketChatAccount *ya)
 
 static guint rc_conv_send_typing(PurpleConversation *conv, PurpleIMTypingState state, RocketChatAccount *ya);
 static gulong chat_conversation_typing_signal = 0;
+static void rc_mark_conv_seen(PurpleConversation *conv, PurpleConversationUpdateType type);
+static gulong conversation_updated_signal = 0;
 
 void
 rc_login(PurpleAccount *account)
@@ -1330,6 +1341,9 @@ rc_login(PurpleAccount *account)
 	
 	if (!chat_conversation_typing_signal) {
 		chat_conversation_typing_signal = purple_signal_connect(purple_conversations_get_handle(), "chat-conversation-typing", purple_connection_get_protocol(pc), PURPLE_CALLBACK(rc_conv_send_typing), NULL);
+	}
+	if (!conversation_updated_signal) {
+		conversation_updated_signal = purple_signal_connect(purple_conversations_get_handle(), "conversation-updated", purple_connection_get_protocol(pc), PURPLE_CALLBACK(rc_mark_conv_seen), NULL);
 	}
 }
 
@@ -2222,6 +2236,60 @@ rc_join_chat(PurpleConnection *pc, GHashTable *chatdata)
 	rc_join_room(ya, id);
 }
 
+static void
+rc_mark_room_messages_read(RocketChatAccount *ya, const gchar *room_id)
+{
+	JsonObject *data;
+	JsonArray *params;
+	
+	data = json_object_new();
+	params = json_array_new();
+	
+	json_array_add_string_element(params, room_id);
+	
+	json_object_set_string_member(data, "msg", "method");
+	json_object_set_string_member(data, "method", "readMessages");
+	json_object_set_array_member(data, "params", params);
+	json_object_set_string_member(data, "id", rc_get_next_id_str(ya));
+	
+	rc_socket_write_json(ya, data);
+}
+
+static void
+rc_mark_conv_seen(PurpleConversation *conv, PurpleConversationUpdateType type)
+{
+	PurpleConnection *pc;
+	RocketChatAccount *ya;
+	const gchar *room_id;
+	
+	if (type != PURPLE_CONVERSATION_UPDATE_UNSEEN)
+		return;
+	
+	pc = purple_conversation_get_connection(conv);
+	if (!PURPLE_CONNECTION_IS_CONNECTED(pc))
+		return;
+	
+	if (g_strcmp0(purple_protocol_get_id(purple_connection_get_protocol(pc)), ROCKETCHAT_PLUGIN_ID))
+		return;
+	
+	ya = purple_connection_get_protocol_data(pc);
+	
+	room_id = purple_conversation_get_data(conv, "id");
+	if (room_id == NULL) {
+		if (PURPLE_IS_IM_CONVERSATION(conv)) {
+			room_id = g_hash_table_lookup(ya->one_to_ones_rev, purple_conversation_get_name(conv));
+		} else {
+			room_id = purple_conversation_get_name(conv);
+			if (g_hash_table_lookup(ya->group_chats_rev, room_id)) {
+				// Convert friendly name into id
+				room_id = g_hash_table_lookup(ya->group_chats_rev, room_id);
+			}
+		}
+	}
+	g_return_if_fail(room_id != NULL);
+	
+	rc_mark_room_messages_read(ya, room_id);
+}
 
 static guint
 rc_conv_send_typing(PurpleConversation *conv, PurpleIMTypingState state, RocketChatAccount *ya)
