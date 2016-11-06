@@ -1204,17 +1204,30 @@ rc_roomlist_got_list(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
 		JsonObject *channel = json_array_get_object_element(channels, i);
 		const gchar *id = json_object_get_string_member(channel, "_id");
 		const gchar *name = json_object_get_string_member(channel, "name");
-		gchar *hashed_name = g_strconcat("#", name, NULL);
-		PurpleRoomlistRoom *room = purple_roomlist_room_new(PURPLE_ROOMLIST_ROOMTYPE_ROOM, name ? hashed_name : id, NULL);
+		const gchar *room_type = json_object_get_string_member(channel, "t");
+		PurpleRoomlistRoom *room = purple_roomlist_room_new(PURPLE_ROOMLIST_ROOMTYPE_ROOM, name, NULL);
 		
 		purple_roomlist_room_add_field(roomlist, room, id);
 		purple_roomlist_room_add_field(roomlist, room, name);
+		purple_roomlist_room_add_field(roomlist, room, *room_type == 'p' ? _("Private") : "");
 		
 		purple_roomlist_room_add(roomlist, room);
-		g_free(hashed_name);
 	}
 	
 	purple_roomlist_set_in_progress(roomlist, FALSE);
+}
+
+static gchar *
+rc_roomlist_serialize(PurpleRoomlistRoom *room) {
+	GList *fields = purple_roomlist_room_get_fields(room);
+	const gchar *id = (const gchar *) fields->data;
+	const gchar *name = (const gchar *) fields->next->data;
+	
+	if (name && *name) {
+		return g_strconcat("#", name, NULL);
+	} else {
+		return g_strdup(id);
+	}
 }
 
 PurpleRoomlist *
@@ -1231,6 +1244,9 @@ rc_roomlist_get_list(PurpleConnection *pc)
 	fields = g_list_append(fields, f);
 
 	f = purple_roomlist_field_new(PURPLE_ROOMLIST_FIELD_STRING, _("Name"), "name", TRUE);
+	fields = g_list_append(fields, f);
+
+	f = purple_roomlist_field_new(PURPLE_ROOMLIST_FIELD_STRING, _("Type"), "t", FALSE);
 	fields = g_list_append(fields, f);
 
 	purple_roomlist_set_fields(roomlist, fields);
@@ -2867,6 +2883,7 @@ plugin_init(PurplePlugin *plugin)
 	prpl_info->add_buddy = rc_add_buddy;
 	
 	prpl_info->roomlist_get_list = rc_roomlist_get_list;
+	prpl_info->roomlist_room_serialize = rc_roomlist_serialize;
 }
 
 static PurplePluginInfo info = {
@@ -2984,6 +3001,7 @@ static void
 rc_protocol_roomlist_iface_init(PurpleProtocolRoomlistIface *prpl_info)
 {
 	prpl_info->get_list = rc_roomlist_get_list;
+	prpl_info->room_serialize = rc_roomlist_serialize;
 }
 
 static PurpleProtocol *rc_protocol;
