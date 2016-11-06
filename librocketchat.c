@@ -797,18 +797,25 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message, JsonObject *
 	const gchar *t = json_object_get_string_member(message, "t");
 	const gchar *username = json_object_get_string_member(u, "username");
 	const gchar *roomType = json_object_get_string_member(roomarg, "roomType");
+	const gchar *room_name = g_hash_table_lookup(ya->group_chats, rid);
 	gint64 sdate = json_object_get_int_member(ts, "$date");
 	gint64 timestamp = sdate / 1000;
 	PurpleMessageFlags msg_flags = (purple_strequal(username, ya->self_user) ? PURPLE_MESSAGE_SEND : PURPLE_MESSAGE_RECV);
 	
 	if (purple_strequal(t, "uj")) {
-		PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(rid, ya->account);
+		PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_name, ya->account);
+		if (chatconv == NULL) {
+			chatconv = purple_conversations_find_chat_with_account(rid, ya->account);
+		}
 		
 		if (chatconv != NULL) {
 			purple_chat_conversation_add_user(chatconv, username, NULL, PURPLE_CHAT_USER_NONE, TRUE);
 		}
 	} else if (purple_strequal(t, "ul")) {
-		PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(rid, ya->account);
+		PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_name, ya->account);
+		if (chatconv == NULL) {
+			chatconv = purple_conversations_find_chat_with_account(rid, ya->account);
+		}
 		
 		if (chatconv != NULL) {
 			purple_chat_conversation_remove_user(chatconv, username, NULL);
@@ -821,6 +828,11 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message, JsonObject *
 			if ((roomType != NULL && *roomType != 'd') || g_hash_table_contains(ya->group_chats, rid)) {
 				// Group chat message
 				purple_serv_got_chat_in(ya->pc, g_str_hash(rid), username, msg_flags, message, timestamp);
+				
+				if (purple_conversation_has_focus(PURPLE_CONVERSATION(purple_conversations_find_chat_with_account(room_name ? room_name : rid, ya->account)))) {
+					rc_mark_room_messages_read(ya, rid);
+				}
+				
 			} else {
 				if (msg_flags == PURPLE_MESSAGE_RECV) {
 					purple_serv_got_im(ya->pc, username, message, msg_flags, timestamp);
@@ -964,7 +976,10 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 				if (!purple_strequal(username, ya->self_user)) {
 					if (g_hash_table_contains(ya->group_chats, room_id)) {
 						// This is a group conversation
-						PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_id, ya->account);
+						PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(g_hash_table_lookup(ya->group_chats, room_id), ya->account);
+						if (chatconv == NULL) {
+							chatconv = purple_conversations_find_chat_with_account(room_id, ya->account);
+						}
 						if (chatconv != NULL) {
 							PurpleChatUser *cb = purple_chat_conversation_find_user(chatconv, username);
 							PurpleChatUserFlags cbflags;
