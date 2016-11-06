@@ -141,6 +141,8 @@ g_str_insensitive_hash(gconstpointer v)
 #define purple_chat_conversation_add_user     purple_conv_chat_add_user
 #define purple_chat_conversation_add_users    purple_conv_chat_add_users
 #define purple_chat_conversation_remove_user  purple_conv_chat_remove_user
+#define purple_chat_conversation_get_topic    purple_conv_chat_get_topic
+#define purple_chat_conversation_set_topic    purple_conv_chat_set_topic
 #define PurpleChatUserFlags  PurpleConvChatBuddyFlags
 #define PURPLE_CHAT_USER_NONE     PURPLE_CBFLAGS_NONE
 #define PURPLE_CHAT_USER_OP       PURPLE_CBFLAGS_OP
@@ -681,7 +683,30 @@ rc_got_open_rooms(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
 {
 	//a["{\"msg\":\"result\",\"id\":\"9\",\"result\":{\"update\":[{\"_id\":\"GENERAL\",\"name\":\"general\",\"t\":\"c\",\"topic\":\"Community support in [#support](https://demo.rocket.chat/channel/support).  Developers in [#dev](https://demo.rocket.chat/channel/dev)\",\"muted\":[\"daly\",\"kkloggg\",\"staci.holmes.segarra\"],\"jitsiTimeout\":{\"$date\":1476781304981},\"default\":true},{\"_id\":\"YdpayxcMhWFGKRZb3hZKg86uJavE6jYLya\",\"t\":\"d\"},{\"_id\":\"hZKg86uJavE6jYLyavxiySsLD8gLjgnmnN\",\"t\":\"d\"},{\"_id\":\"2urrp3DyDkLxoMAd3hZKg86uJavE6jYLya\",\"t\":\"d\"},{\"_id\":\"QFhAaDzea7cFK6ChB\",\"name\":\"test-private\",\"t\":\"p\",\"u\":{\"_id\":null,\"username\":null},\"ro\":false},{\"_id\":\"b98BYkRbiD5swDfyY\",\"name\":\"dev\",\"t\":\"c\",\"u\":{\"_id\":\"yhHvK7uhhXh9DqKWH\",\"username\":\"diego.sampaio\"},\"topic\":\"Community and core devs hangout.  Learn code in [#learn](https://demo.rocket.chat/channel/learn).  Get support in [#support](https://demo.rocket.chat/channel/support)\",\"muted\":[\"geektest123\"],\"jitsiTimeout\":{\"$date\":1465876457842}},{\"_id\":\"JoxbibGnXizRb4ef4hZKg86uJavE6jYLya\",\"t\":\"d\"}],\"remove\":[{\"_id\":\"8cXLWPathApTRXHZZ\",\"_deletedAt\":{\"$date\":1477179315230}}]}}"]
 	
+	JsonObject *result = json_node_get_object(node);
+	JsonArray *update = json_object_get_array_member(result, "update");
+	gint i, len = json_array_get_length(update);
 	
+	for(i = 0; i < len; i++) {
+		JsonObject *room_info = json_array_get_object_element(update, i);
+		const gchar *room_type = json_object_get_string_member(room_info, "t");
+		
+		if (*room_type != 'd') {
+			const gchar *topic = json_object_get_string_member(room_info, "topic");
+			const gchar *room_name = json_object_get_string_member(room_info, "name");
+			PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_name, ya->account);
+			if (chatconv == NULL) {
+				const gchar *room_id = json_object_get_string_member(room_info, "_id");
+				chatconv = purple_conversations_find_chat_with_account(room_id, ya->account);
+			}
+
+			if (chatconv != NULL && topic != NULL) {
+				gchar *html_topic = rc_markdown_to_html(topic);
+				purple_chat_conversation_set_topic(chatconv, NULL, html_topic);
+				g_free(html_topic);
+			}
+		}
+	}
 }
 
 static void
@@ -822,6 +847,17 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message, JsonObject *
 		
 		if (chatconv != NULL) {
 			purple_chat_conversation_remove_user(chatconv, username, NULL);
+		}
+	} else if (purple_strequal(t, "room_changed_topic")) {
+		PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_name, ya->account);
+		if (chatconv == NULL) {
+			chatconv = purple_conversations_find_chat_with_account(rid, ya->account);
+		}
+		
+		if (chatconv != NULL) {
+			gchar *html_topic = rc_markdown_to_html(msg_text);
+			purple_chat_conversation_set_topic(chatconv, NULL, html_topic);
+			g_free(html_topic);
 		}
 	} else {
 		gchar *message = rc_markdown_to_html(msg_text);
@@ -1033,8 +1069,7 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 				// New chat started
 				//a["{\"msg\":\"changed\",\"collection\":\"stream-notify-user\",\"id\":\"id\",\"fields\":{\"eventName\":\"hZKg86uJavE6jYLya/rooms-changed\",\"args\":[\"inserted\",{\"_id\":\"JoxbibGnXizRb4ef4hZKg86uJavE6jYLya\",\"t\":\"d\"}]}}"]
 				//a["{\"msg\":\"changed\",\"collection\":\"stream-notify-user\",\"id\":\"id\",\"fields\":{\"eventName\":\"hZKg86uJavE6jYLya/rooms-changed\",\"args\":[\"inserted\",{\"_id\":\"GENERAL\",\"name\":\"general\",\"t\":\"c\",\"topic\":\"Community support in [#support](https://demo.rocket.chat/channel/support).  Developers in [#dev](https://demo.rocket.chat/channel/dev)\",\"muted\":[\"daly\",\"kkloggg\",\"staci.holmes.segarra\"],\"jitsiTimeout\":{\"$date\":1477687206856},\"default\":true}]}}"]
-				
-				//purple_conv_chat_set_topic(chat, NULL, topic);
+				//a["{\"msg\":\"changed\",\"collection\":\"stream-notify-user\",\"id\":\"id\",\"fields\":{\"eventName\":\"hZKg86uJavE6jYLya/rooms-changed\",\"args\":[\"updated\",{\"_id\":\"ocwXv7EvCJ69d3AdG\",\"name\":\"eiontestchat\",\"t\":\"p\",\"u\":{\"_id\":null,\"username\":null},\"topic\":\"ham salad\",\"ro\":false}]}}"]
 			} else if (purple_strequal(event_split[1], "subscriptions-changed")) {
 				// Joined a chat			//a["{\"msg\":\"changed\",\"collection\":\"stream-notify-user\",\"id\":\"id\",\"fields\":{\"eventName\":\"oAKZSpTPTQHbp6nBD/subscriptions-changed\",\"args\":[\"inserted\",{\"t\":\"d\",\"ts\":{\"$date\":1477264898460},\"ls\":{\"$date\":1477264898460},\"name\":\"eionrobb\",\"rid\":\"hZKg86uJavE6jYLyaoAKZSpTPTQHbp6nBD\",\"u\":{\"_id\":\"oAKZSpTPTQHbp6nBD\",\"username\":\"eiontest\"},\"open\":true,\"alert\":false,\"unread\":0,\"_updatedAt\":{\"$date\":1477264898482},\"_id\":\"seeiaYbHTmFzbZKPx\"}]}}"]
 				//a["{\"msg\":\"changed\",\"collection\":\"stream-notify-user\",\"id\":\"id\",\"fields\":{\"eventName\":\"hZKg86uJavE6jYLya/subscriptions-changed\",\"args\":[\"inserted\",{\"t\":\"c\",\"ts\":{\"$date\":1477913491203},\"name\":\"general\",\"rid\":\"GENERAL\",\"u\":{\"_id\":\"hZKg86uJavE6jYLya\",\"username\":\"eionrobb\"},\"open\":true,\"alert\":true,\"unread\":1,\"_updatedAt\":{\"$date\":1477913492365},\"_id\":\"AakoPQ2mvhXyaFRux\"}]}}"]
@@ -2590,6 +2625,45 @@ const gchar *who, const gchar *message, PurpleMessageFlags flags)
 // }
 
 static void
+rc_chat_set_topic(PurpleConnection *pc, int id, const char *topic)
+{
+	RocketChatAccount *ya;
+	const gchar *room_id;
+	PurpleChatConversation *chatconv;
+	JsonObject *data;
+	JsonArray *params;
+	
+	ya = purple_connection_get_protocol_data(pc);
+	chatconv = purple_conversations_find_chat(pc, id);
+	room_id = purple_conversation_get_data(PURPLE_CONVERSATION(chatconv), "id");
+	if (!room_id) {
+		// Fix for a race condition around the chat data and serv_got_joined_chat()
+		room_id = purple_conversation_get_name(PURPLE_CONVERSATION(chatconv));
+		if (g_hash_table_lookup(ya->group_chats_rev, room_id)) {
+			// Convert friendly name into id
+			room_id = g_hash_table_lookup(ya->group_chats_rev, room_id);
+		}
+		g_return_if_fail(room_id);
+	}
+	g_return_if_fail(g_hash_table_contains(ya->group_chats, room_id)); //TODO rejoin room?
+	
+	//["{\"msg\":\"method\",\"method\":\"saveRoomSettings\",\"params\":[\"ocwXv7EvCJ69d3AdG\",\"roomTopic\",\"set topic here plzkthxbai\"],\"id\":\"16\"}"]
+	data = json_object_new();
+	params = json_array_new();
+	
+	json_array_add_string_element(params, room_id);
+	json_array_add_string_element(params, "roomTopic");
+	json_array_add_string_element(params, topic);
+	
+	json_object_set_string_member(data, "msg", "method");
+	json_object_set_string_member(data, "method", "saveRoomSettings");
+	json_object_set_array_member(data, "params", params);
+	json_object_set_string_member(data, "id", rc_get_next_id_str(ya));
+	
+	rc_socket_write_json(ya, data);
+}
+
+static void
 rc_got_avatar(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
 {
 	JsonObject *response = json_node_get_object(node);
@@ -2765,7 +2839,7 @@ plugin_init(PurplePlugin *plugin)
 		//prpl_info->add_buddy_with_invite = rc_add_buddy_with_invite;
 	#endif
 	
-	prpl_info->options = OPT_PROTO_SLASH_COMMANDS_NATIVE;
+	prpl_info->options = OPT_PROTO_CHAT_TOPIC | OPT_PROTO_SLASH_COMMANDS_NATIVE;
 	prpl_info->icon_spec.format = "png,gif,jpeg";
 	prpl_info->icon_spec.min_width = 0;
 	prpl_info->icon_spec.min_height = 0;
@@ -2789,6 +2863,7 @@ plugin_init(PurplePlugin *plugin)
 	prpl_info->get_chat_name = rc_get_chat_name;
 	prpl_info->chat_invite = rc_chat_invite;
 	prpl_info->chat_send = rc_chat_send;
+	prpl_info->set_chat_topic = rc_chat_set_topic;
 	prpl_info->add_buddy = rc_add_buddy;
 	
 	prpl_info->roomlist_get_list = rc_roomlist_get_list;
@@ -2857,6 +2932,7 @@ rc_protocol_init(PurpleProtocol *prpl_info)
 
 	info->id = ROCKETCHAT_PLUGIN_ID;
 	info->name = "Rocket.Chat";
+	info->options = OPT_PROTO_CHAT_TOPIC | OPT_PROTO_SLASH_COMMANDS_NATIVE;
 	
 	split = purple_account_user_split_new(_("Server"), RC_DEFAULT_SERVER, RC_SERVER_SPLIT_CHAR);
 	info->user_splits = g_list_append(info->user_splits, split);
@@ -2894,6 +2970,7 @@ rc_protocol_chat_iface_init(PurpleProtocolChatIface *prpl_info)
 	prpl_info->join = rc_join_chat;
 	prpl_info->get_name = rc_get_chat_name;
 	prpl_info->invite = rc_chat_invite;
+	prpl_info->set_topic = rc_chat_set_topic;
 }
 
 static void 
