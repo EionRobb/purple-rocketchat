@@ -512,6 +512,7 @@ gpointer user_data, const gchar *url_text, gsize len, const gchar *error_message
 	rc_update_cookies(conn->ya, url_text);
 	
 	body = g_strstr_len(url_text, len, "\r\n\r\n");
+	body = body ? body + 4 : body;
 	body_len = len - (body - url_text);
 #else
 	rc_update_cookies(conn->ya, purple_http_response_get_headers_by_name(response, "Set-Cookie"));
@@ -530,9 +531,11 @@ gpointer user_data, const gchar *url_text, gsize len, const gchar *error_message
 			json_node_set_object(dummy_node, dummy_object);
 			json_object_set_string_member(dummy_object, "body", body);
 			json_object_set_int_member(dummy_object, "len", body_len);
+			g_dataset_set_data(dummy_node, "raw_body", (gpointer) body);
 			
 			conn->callback(conn->ya, dummy_node, conn->user_data);
 			
+			g_dataset_destroy(dummy_node);
 			json_node_free(dummy_node);
 			json_object_unref(dummy_object);
 		}
@@ -901,6 +904,7 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 			const gchar *user_id = json_object_get_string_member(obj, "id");
 			const gchar *username = json_object_get_string_member(fields, "username");
 			const gchar *status = json_object_get_string_member(fields, "status");
+			const gchar *name = json_object_get_string_member(fields, "name");
 			
 			if (status != NULL) {
 				purple_protocol_got_user_status(ya->account, username, status, NULL);
@@ -917,7 +921,12 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 					purple_connection_set_display_name(ya->pc, ya->self_user);
 					rc_account_connected(ya, NULL, NULL);
 				}
+				
+				if (name != NULL) {
+					purple_serv_got_alias(ya->pc, username, name);
+				}
 			}
+			
 		}
 	} else if (purple_strequal(msg, "changed")) {
 		const gchar *collection = json_object_get_string_member(obj, "collection");
@@ -2589,7 +2598,7 @@ rc_got_avatar(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
 	gsize response_len;
 	gpointer response_dup;
 	
-	response_str = json_object_get_string_member(response, "body");
+	response_str = g_dataset_get_data(node, "raw_body");
 	response_len = json_object_get_int_member(response, "len");
 	response_dup = g_memdup(response_str, response_len);
 	
