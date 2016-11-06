@@ -660,6 +660,11 @@ rc_login_response(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
 		return;
 	}
 	
+	if (ya->session_token != NULL && ya->self_user != NULL) {
+		// Resubscribe if we're reestablishing a session
+		rc_account_connected(ya, NULL, NULL);
+	}
+	
 	response = json_node_get_object(node);
 	
 	if (json_object_has_member(response, "token")) {
