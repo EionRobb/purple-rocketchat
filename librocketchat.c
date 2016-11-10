@@ -906,7 +906,9 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message, JsonObject *
 	
 	return sdate;
 }
-	
+
+void handle_add_new_user(RocketChatAccount *ya, const JsonObject *obj);
+
 static void
 rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 {
@@ -925,46 +927,13 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 			purple_blist_add_group(rc_group, NULL);
 		}
 	}
-	
+
 	if (purple_strequal(msg, "ping")) {
 		response = json_object_new();
 		json_object_set_string_member(response, "msg", "pong");
 	} else if (purple_strequal(msg, "added")) {
-		const gchar *collection = json_object_get_string_member(obj, "collection");
-
-	// a["{\"msg\":\"added\",\"collection\":\"users\",\"id\":\"hZKg86uJavE6jYLya\",\"fields\":{\"emails\":[{\"address\":\"eion@robbmob.com\",\"verified\":true}],\"username\":\"eionrobb\"}}"]
-
-	//a["{\"msg\":\"added\",\"collection\":\"users\",\"id\":\"M6m6odi9ufFJtFzZ3\",\"fields\":{\"status\":\"online\",\"username\":\"ali-14\",\"utcOffset\":3.5}}"]
-		if (purple_strequal(collection, "users")) {
-			JsonObject *fields = json_object_get_object_member(obj, "fields");
-			const gchar *user_id = json_object_get_string_member(obj, "id");
-			const gchar *username = json_object_get_string_member(fields, "username");
-			const gchar *status = json_object_get_string_member(fields, "status");
-			const gchar *name = json_object_get_string_member(fields, "name");
-			
-			if (status != NULL) {
-				purple_protocol_got_user_status(ya->account, username, status, NULL);
-			}
-			
-			if (username != NULL) {
-				g_hash_table_replace(ya->usernames_to_ids, g_strdup(username), g_strdup(user_id));
-				g_hash_table_replace(ya->ids_to_usernames, g_strdup(user_id), g_strdup(username));
-				
-				if (!ya->self_user) {
-					// The first user added to the collection is us
-					ya->self_user = g_strdup(username);
-					
-					purple_connection_set_display_name(ya->pc, ya->self_user);
-					rc_account_connected(ya, NULL, NULL);
-				}
-				
-				if (name != NULL) {
-					purple_serv_got_alias(ya->pc, username, name);
-				}
-			}
-			
-		}
-	} else if (purple_strequal(msg, "changed")) {
+        handle_add_new_user(ya, obj);
+    } else if (purple_strequal(msg, "changed")) {
 		const gchar *collection = json_object_get_string_member(obj, "collection");
 		if (purple_strequal(collection, "users")) {
 			JsonObject *fields = json_object_get_object_member(obj, "fields");
@@ -1189,6 +1158,42 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 	if (response != NULL) {
 		rc_socket_write_json(ya, response);
 	}
+}
+
+void handle_add_new_user(RocketChatAccount *ya, const JsonObject *obj) {
+    const gchar *collection = json_object_get_string_member(obj, "collection");
+
+    // a["{\"msg\":\"added\",\"collection\":\"users\",\"id\":\"hZKg86uJavE6jYLya\",\"fields\":{\"emails\":[{\"address\":\"eion@robbmob.com\",\"verified\":true}],\"username\":\"eionrobb\"}}"]
+
+    //a["{\"msg\":\"added\",\"collection\":\"users\",\"id\":\"M6m6odi9ufFJtFzZ3\",\"fields\":{\"status\":\"online\",\"username\":\"ali-14\",\"utcOffset\":3.5}}"]
+    if (purple_strequal(collection, "users")) {
+			JsonObject *fields = json_object_get_object_member(obj, "fields");
+			const gchar *user_id = json_object_get_string_member(obj, "id");
+			const gchar *username = json_object_get_string_member(fields, "username");
+			const gchar *status = json_object_get_string_member(fields, "status");
+			const gchar *name = json_object_get_string_member(fields, "name");
+
+			if (status != NULL) {
+				purple_protocol_got_user_status(ya->account, username, status, NULL);
+			}
+
+			if (username != NULL) {
+				g_hash_table_replace(ya->usernames_to_ids, g_strdup(username), g_strdup(user_id));
+				g_hash_table_replace(ya->ids_to_usernames, g_strdup(user_id), g_strdup(username));
+
+				if (!ya->self_user) {
+					// The first user added to the collection is us
+					ya->self_user = g_strdup(username);
+
+					purple_connection_set_display_name(ya->pc, ya->self_user);
+					rc_account_connected(ya, NULL, NULL);
+				}
+
+				if (name != NULL) {
+					purple_serv_got_alias(ya->pc, username, name);
+				}
+			}
+		}
 }
 
 static void
@@ -1501,7 +1506,7 @@ rc_process_frame(RocketChatAccount *rca, const gchar *frame)
 	const gchar frame_type = frame[0];
 	
 	purple_debug_info("rocketchat", "got frame data: %s\n", frame);
-	
+
 	if (!json_parser_load_from_data(parser, frame + 1, -1, NULL))
 	{
 		purple_debug_error("rocketchat", "Error parsing response: %s\n", frame);
@@ -1511,6 +1516,7 @@ rc_process_frame(RocketChatAccount *rca, const gchar *frame)
 	root = json_parser_get_root(parser);
 	
 	if (root != NULL) {
+		purple_debug_error("rocketchat", "fame type is : %c\n", frame_type);
 		if (frame_type == 'a') {
 			JsonArray *message_array = json_node_get_array(root);
 			guint i, len = json_array_get_length(message_array);
