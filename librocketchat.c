@@ -1181,7 +1181,7 @@ void handle_add_new_user(RocketChatAccount *ya, const JsonObject *obj) {
 			const gchar *name = json_object_get_string_member(fields, "name");
 
 			if (status != NULL) {
-				purple_protocol_got_user_status(ya->account, user_id, status, NULL);
+				purple_protocol_got_user_status(ya->account, username, status, NULL);
 			}
 
 			if (username != NULL) {
@@ -1198,9 +1198,9 @@ void handle_add_new_user(RocketChatAccount *ya, const JsonObject *obj) {
                     //other user not us
                     PurpleAccount* pa = ya->account;
                     PurpleGroup *defaultGroup = get_or_create_default_group();
-                    GSList *existingBuddies = purple_find_buddies(pa, user_id);
+                    GSList *existingBuddies = purple_find_buddies(pa, username);
                     if (existingBuddies == NULL) {
-                        PurpleBuddy *b = purple_buddy_new(pa, user_id, username);
+                        PurpleBuddy *b = purple_buddy_new(pa, username, username);
                         purple_blist_add_buddy(b, NULL, defaultGroup, NULL);
                         purple_blist_alias_buddy(b, username);
                     }
