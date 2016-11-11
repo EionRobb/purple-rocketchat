@@ -907,9 +907,9 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message, JsonObject *
 	return sdate;
 }
 
-void handle_add_new_user(RocketChatAccount *ya, const JsonObject *obj);
+void rc_handle_add_new_user(RocketChatAccount *ya, JsonObject *obj);
 
-PurpleGroup* get_or_create_default_group();
+PurpleGroup* rc_get_or_create_default_group();
 
 static void
 rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
@@ -920,13 +920,13 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 	const gchar *msg = json_object_get_string_member(obj, "msg");
 	// gint64 createdTime = json_object_get_int_member(obj, "createdTime");
 	// gboolean old_event = !ya->sync_complete;
-    get_or_create_default_group();
+    rc_get_or_create_default_group();
 
     if (purple_strequal(msg, "ping")) {
 		response = json_object_new();
 		json_object_set_string_member(response, "msg", "pong");
 	} else if (purple_strequal(msg, "added")) {
-        handle_add_new_user(ya, obj);
+        rc_handle_add_new_user(ya, obj);
     } else if (purple_strequal(msg, "changed")) {
 		const gchar *collection = json_object_get_string_member(obj, "collection");
 		if (purple_strequal(collection, "users")) {
@@ -1154,7 +1154,7 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 	}
 }
 
-PurpleGroup* get_or_create_default_group() {
+PurpleGroup* rc_get_or_create_default_group() {
     PurpleGroup *rc_group = NULL;
     if (rc_group == NULL) {
 		rc_group = purple_blist_find_group(_("Rocket.Chat"));
@@ -1167,7 +1167,7 @@ PurpleGroup* get_or_create_default_group() {
     return rc_group;
 }
 
-void handle_add_new_user(RocketChatAccount *ya, const JsonObject *obj) {
+void rc_handle_add_new_user(RocketChatAccount *ya, JsonObject *obj) {
     const gchar *collection = json_object_get_string_member(obj, "collection");
 
     // a["{\"msg\":\"added\",\"collection\":\"users\",\"id\":\"hZKg86uJavE6jYLya\",\"fields\":{\"emails\":[{\"address\":\"eion@robbmob.com\",\"verified\":true}],\"username\":\"eionrobb\"}}"]
@@ -1195,17 +1195,15 @@ void handle_add_new_user(RocketChatAccount *ya, const JsonObject *obj) {
 					purple_connection_set_display_name(ya->pc, ya->self_user);
 					rc_account_connected(ya, NULL, NULL);
 				} else {
-                    //other user not us
-                    PurpleAccount* pa = ya->account;
-                    PurpleGroup *defaultGroup = get_or_create_default_group();
-                    GSList *existingBuddies = purple_find_buddies(pa, username);
-                    if (existingBuddies == NULL) {
-                        PurpleBuddy *b = purple_buddy_new(pa, username, username);
-                        purple_blist_add_buddy(b, NULL, defaultGroup, NULL);
-                        purple_blist_alias_buddy(b, username);
-                    }
-                    g_slist_free(existingBuddies);
-                }
+					//other user not us
+					PurpleAccount* account = ya->account;
+					PurpleGroup *defaultGroup = rc_get_or_create_default_group();
+					PurpleBuddy *buddy = purple_blist_find_buddy(account, username);
+					if (buddy == NULL) {
+						buddy = purple_buddy_new(account, username, name);
+						purple_blist_add_buddy(buddy, NULL, defaultGroup, NULL);
+					}
+				}
 
 				if (name != NULL) {
 					purple_serv_got_alias(ya->pc, username, name);
