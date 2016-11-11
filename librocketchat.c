@@ -1168,48 +1168,48 @@ PurpleGroup* rc_get_or_create_default_group() {
 }
 
 void rc_handle_add_new_user(RocketChatAccount *ya, JsonObject *obj) {
+	PurpleAccount* account = ya->account;
+	PurpleGroup *defaultGroup = rc_get_or_create_default_group();
     const gchar *collection = json_object_get_string_member(obj, "collection");
 
     // a["{\"msg\":\"added\",\"collection\":\"users\",\"id\":\"hZKg86uJavE6jYLya\",\"fields\":{\"emails\":[{\"address\":\"eion@robbmob.com\",\"verified\":true}],\"username\":\"eionrobb\"}}"]
 
     //a["{\"msg\":\"added\",\"collection\":\"users\",\"id\":\"M6m6odi9ufFJtFzZ3\",\"fields\":{\"status\":\"online\",\"username\":\"ali-14\",\"utcOffset\":3.5}}"]
     if (purple_strequal(collection, "users")) {
-			JsonObject *fields = json_object_get_object_member(obj, "fields");
-			const gchar *user_id = json_object_get_string_member(obj, "id");
-			const gchar *username = json_object_get_string_member(fields, "username");
-			const gchar *status = json_object_get_string_member(fields, "status");
-			const gchar *name = json_object_get_string_member(fields, "name");
+		JsonObject *fields = json_object_get_object_member(obj, "fields");
+		const gchar *user_id = json_object_get_string_member(obj, "id");
+		const gchar *username = json_object_get_string_member(fields, "username");
+		const gchar *status = json_object_get_string_member(fields, "status");
+		const gchar *name = json_object_get_string_member(fields, "name");
 
-			if (status != NULL) {
-				purple_protocol_got_user_status(ya->account, username, status, NULL);
+		if (status != NULL) {
+			purple_protocol_got_user_status(ya->account, username, status, NULL);
+		}
+
+		if (username != NULL) {
+			g_hash_table_replace(ya->usernames_to_ids, g_strdup(username), g_strdup(user_id));
+			g_hash_table_replace(ya->ids_to_usernames, g_strdup(user_id), g_strdup(username));
+
+			if (!ya->self_user) {
+				// The first user added to the collection is us
+				ya->self_user = g_strdup(username);
+
+				purple_connection_set_display_name(ya->pc, ya->self_user);
+				rc_account_connected(ya, NULL, NULL);
+			} else if (purple_account_get_bool(account, "auto-add-buddy", FALSE)) {
+				//other user not us
+				PurpleBuddy *buddy = purple_blist_find_buddy(account, username);
+				if (buddy == NULL) {
+					buddy = purple_buddy_new(account, username, name);
+					purple_blist_add_buddy(buddy, NULL, defaultGroup, NULL);
+				}
 			}
 
-			if (username != NULL) {
-				g_hash_table_replace(ya->usernames_to_ids, g_strdup(username), g_strdup(user_id));
-				g_hash_table_replace(ya->ids_to_usernames, g_strdup(user_id), g_strdup(username));
-
-				if (!ya->self_user) {
-					// The first user added to the collection is us
-					ya->self_user = g_strdup(username);
-
-					purple_connection_set_display_name(ya->pc, ya->self_user);
-					rc_account_connected(ya, NULL, NULL);
-				} else {
-					//other user not us
-					PurpleAccount* account = ya->account;
-					PurpleGroup *defaultGroup = rc_get_or_create_default_group();
-					PurpleBuddy *buddy = purple_blist_find_buddy(account, username);
-					if (buddy == NULL) {
-						buddy = purple_buddy_new(account, username, name);
-						purple_blist_add_buddy(buddy, NULL, defaultGroup, NULL);
-					}
-				}
-
-				if (name != NULL) {
-					purple_serv_got_alias(ya->pc, username, name);
-				}
+			if (name != NULL) {
+				purple_serv_got_alias(ya->pc, username, name);
 			}
 		}
+	}
 }
 
 static void
@@ -2814,6 +2814,17 @@ rc_get_account_text_table(PurpleAccount *unused)
 	return table;
 }
 
+static GList *
+rc_add_account_options(GList *account_options)
+{
+	PurpleAccountOption *option;
+	
+	option = purple_account_option_bool_new(N_("Auto-add buddies to the buddy list"), "auto-add-buddy", FALSE);
+	account_options = g_list_append(account_options, option);
+	
+	return account_options;
+}
+
 static PurpleCmdRet
 rc_cmd_leave(PurpleConversation *conv, const gchar *cmd, gchar **args, gchar **error, void *data)
 {
@@ -2894,6 +2905,7 @@ plugin_init(PurplePlugin *plugin)
 	#endif
 	
 	prpl_info->options = OPT_PROTO_CHAT_TOPIC | OPT_PROTO_SLASH_COMMANDS_NATIVE;
+	prpl_info->protocol_options = rc_add_account_options(prpl_info->protocol_options);
 	prpl_info->icon_spec.format = "png,gif,jpeg";
 	prpl_info->icon_spec.min_width = 0;
 	prpl_info->icon_spec.min_height = 0;
@@ -2989,6 +3001,7 @@ rc_protocol_init(PurpleProtocol *prpl_info)
 	info->id = ROCKETCHAT_PLUGIN_ID;
 	info->name = "Rocket.Chat";
 	info->options = OPT_PROTO_CHAT_TOPIC | OPT_PROTO_SLASH_COMMANDS_NATIVE;
+	info->account_options = rc_add_account_options(info->account_options);
 	
 	split = purple_account_user_split_new(_("Server"), RC_DEFAULT_SERVER, RC_SERVER_SPLIT_CHAR);
 	info->user_splits = g_list_append(info->user_splits, split);
