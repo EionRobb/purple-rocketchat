@@ -120,6 +120,12 @@ g_str_insensitive_hash(gconstpointer v)
 #define purple_connection_get_protocol          purple_connection_get_prpl
 #define PURPLE_CONNECTION_CONNECTING       PURPLE_CONNECTING
 #define PURPLE_CONNECTION_CONNECTED        PURPLE_CONNECTED
+#define PURPLE_CONNECTION_FLAG_HTML        PURPLE_CONNECTION_HTML
+#define PURPLE_CONNECTION_FLAG_NO_BGCOLOR  PURPLE_CONNECTION_NO_BGCOLOR
+#define PURPLE_CONNECTION_FLAG_NO_FONTSIZE PURPLE_CONNECTION_NO_FONTSIZE
+#define PURPLE_CONNECTION_FLAG_NO_IMAGES   PURPLE_CONNECTION_NO_IMAGES
+#define purple_connection_set_flags(pc, f)      ((pc)->flags = (f))
+#define purple_connection_get_flags(pc)         ((pc)->flags)
 #define purple_blist_find_group        purple_find_group
 #define purple_protocol_get_id  purple_plugin_get_id
 #define PurpleProtocolChatEntry  struct proto_chat_entry
@@ -331,6 +337,127 @@ rc_markdown_to_html(const gchar *markdown)
 	}
 	
 	return g_strndup(markdown_str, markdown_len);
+}
+
+
+
+static void
+rc_markup_anchor_parse_text(GMarkupParseContext *context, const gchar *text, gsize text_len, gpointer user_data, GError **error)
+{
+	GString *output = user_data;
+	
+	g_string_prepend_len(output, text, text_len);
+}
+
+static GMarkupParser rc_markup_anchor_parser = {
+	NULL,
+	NULL,
+	rc_markup_anchor_parse_text,
+	NULL,
+	NULL
+};
+
+static void
+rc_markdown_parse_start_element(GMarkupParseContext *context, const gchar *element_name, const gchar **attribute_names, const gchar **attribute_values, gpointer user_data, GError **error)
+{
+	GString *output = user_data;
+	
+	switch(g_str_hash(element_name)) {
+		case 0x2b607: case 0x2b5e7: //B
+			g_string_append(output, "**");
+			break;
+		case 0x2b60e: case 0x2b5ee: //I
+		case 0x5977b7: case 0x597377: //EM
+			g_string_append_c(output, '_');
+			break;
+		case 0x597495: case 0x597319: //BR
+			g_string_append_c(output, '\n');
+			break;
+		case 0xb8869ba: case 0xb87dd5a: //DEL
+		case 0x2b618: case 0x2b5f8: //S
+		case 0x1c93af97: case 0xcf9972d7: //STRIKE
+			g_string_append(output, "~~");
+			break;
+		case 0x2b606: case 0x2b5e6: //A
+		{
+			const gchar **name_cursor = attribute_names;
+			const gchar **value_cursor = attribute_values;
+			GString *href_string = g_string_new("](");
+			
+			while (*name_cursor) {
+				if (g_ascii_strncasecmp(*name_cursor, "href", -1) == 0) {
+					g_string_append(href_string, *value_cursor);
+					break;
+				}
+				name_cursor++;
+				value_cursor++;
+			}
+		
+			g_string_append_c(output, '[');
+			g_markup_parse_context_push(context, &rc_markup_anchor_parser, href_string);
+			break;
+		}
+	}
+	
+}
+
+static void
+rc_markdown_parse_end_element(GMarkupParseContext *context, const gchar *element_name, gpointer user_data, GError **error)
+{
+	GString *output = user_data;
+	
+	switch(g_str_hash(element_name)) {
+		case 0x2b607: case 0x2b5e7: //B
+			g_string_append(output, "**");
+			break;
+		case 0x2b60e: case 0x2b5ee: //I
+		case 0x5977b7: case 0x597377: //EM
+			g_string_append_c(output, '_');
+			break;
+		case 0xb8869ba: case 0xb87dd5a: //DEL
+		case 0x2b618: case 0x2b5f8: //S
+		case 0x1c93af97: case 0xcf9972d7: //STRIKE
+			g_string_append(output, "~~");
+			break;
+		case 0x2b606: case 0x2b5e6: //A
+		{
+			GString *href_string = g_markup_parse_context_pop(context);
+			g_string_append_printf(output, "%s)", href_string->str);
+			g_string_free(href_string, TRUE);
+			break;
+		}
+	}
+	
+}
+
+static void
+rc_markdown_parse_text(GMarkupParseContext *context, const gchar *text, gsize text_len, gpointer user_data, GError **error)
+{
+	GString *output = user_data;
+	
+	g_string_append_len(output, text, text_len);
+}
+
+static GMarkupParser rc_markup_markdown_parser = {
+	rc_markdown_parse_start_element,
+	rc_markdown_parse_end_element,
+	rc_markdown_parse_text,
+	NULL,
+	NULL
+};
+
+static gchar *
+rc_html_to_markdown(const gchar *html)
+{
+	GString *output = g_string_new(NULL);
+	GMarkupParseContext *context;
+	
+	context = g_markup_parse_context_new(&rc_markup_markdown_parser, G_MARKUP_TREAT_CDATA_AS_TEXT, output, NULL);
+	g_markup_parse_context_parse(context, html, -1, NULL);	
+	g_markup_parse_context_end_parse(context, NULL);
+	g_markup_parse_context_free(context);
+	
+	return g_string_free(output, FALSE);
 }
 
 
@@ -1406,6 +1533,13 @@ rc_login(PurpleAccount *account)
 	gchar **userparts;
 	const gchar *username = purple_account_get_username(account);
 	gchar *url;
+	PurpleConnectionFlags pc_flags;
+	
+	pc_flags = purple_connection_get_flags(pc);
+	pc_flags |= PURPLE_CONNECTION_FLAG_HTML;
+	pc_flags |= PURPLE_CONNECTION_FLAG_NO_FONTSIZE;
+	pc_flags |= PURPLE_CONNECTION_FLAG_NO_BGCOLOR;
+	purple_connection_set_flags(pc, pc_flags);
 	
 	ya = g_new0(RocketChatAccount, 1);
 	purple_connection_set_protocol_data(pc, ya);
@@ -2494,7 +2628,7 @@ rc_conversation_send_message(RocketChatAccount *ya, const gchar *rid, const gcha
 	
 	json_object_set_string_member(param, "rid", rid);
 	
-	stripped = g_strstrip(purple_markup_strip_html(message));
+	stripped = rc_html_to_markdown(message);
 	json_object_set_string_member(param, "msg", stripped);
 	g_free(stripped);
 	
