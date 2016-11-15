@@ -370,7 +370,7 @@ rc_markdown_parse_start_element(GMarkupParseContext *context, const gchar *eleme
 		case 0x5977b7: case 0x597377: //EM
 			g_string_append_c(output, '_');
 			break;
-		case 0x597495: case 0x597319: //BR
+		case 0x597759: case 0x597319: //BR
 			g_string_append_c(output, '\n');
 			break;
 		case 0xb8869ba: case 0xb87dd5a: //DEL
@@ -453,7 +453,9 @@ rc_html_to_markdown(const gchar *html)
 	GMarkupParseContext *context;
 	
 	context = g_markup_parse_context_new(&rc_markup_markdown_parser, G_MARKUP_TREAT_CDATA_AS_TEXT, output, NULL);
+	g_markup_parse_context_parse(context, "<html>", -1, NULL);	
 	g_markup_parse_context_parse(context, html, -1, NULL);	
+	g_markup_parse_context_parse(context, "</html>", -1, NULL);	
 	g_markup_parse_context_end_parse(context, NULL);
 	g_markup_parse_context_free(context);
 	
