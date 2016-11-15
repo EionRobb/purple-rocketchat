@@ -499,6 +499,7 @@ PurpleHttpResponse *response, gpointer user_data)
 {
 	gsize len;
 	const gchar *url_text = purple_http_response_get_data(response, &len);
+	const gchar *error_message = purple_http_response_get_error(response);
 #else
 gpointer user_data, const gchar *url_text, gsize len, const gchar *error_message)
 {
@@ -527,6 +528,8 @@ gpointer user_data, const gchar *url_text, gsize len, const gchar *error_message
 		gchar *error_msg_formatted = g_strdup_printf(_("Connection error: %s."), error_message);
 		purple_connection_error(conn->ya->pc, PURPLE_CONNECTION_ERROR_NETWORK_ERROR, error_msg_formatted);
 		g_free(error_msg_formatted);
+		g_free(conn);
+		return;
 	}
 	if (body != NULL && !json_parser_load_from_data(parser, body, body_len, NULL)) {
 		//purple_debug_error("rocketchat", "Error parsing response: %s\n", body);
