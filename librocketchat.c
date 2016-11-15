@@ -522,9 +522,13 @@ gpointer user_data, const gchar *url_text, gsize len, const gchar *error_message
 	body = url_text;
 	body_len = len;
 #endif
-	
-	if (!json_parser_load_from_data(parser, body, body_len, NULL))
-	{
+	if (body == NULL && error_message != NULL) {
+		//connection error - unersolvable dns name, non existing server
+		gchar *error_msg_formatted = g_strdup_printf(_("Connection error: %s."), error_message);
+		purple_connection_error(conn->ya->pc, PURPLE_CONNECTION_ERROR_NETWORK_ERROR, error_msg_formatted);
+		g_free(error_msg_formatted);
+	}
+	if (body != NULL && !json_parser_load_from_data(parser, body, body_len, NULL)) {
 		//purple_debug_error("rocketchat", "Error parsing response: %s\n", body);
 		if (conn->callback) {
 			JsonNode *dummy_node = json_node_new(JSON_NODE_OBJECT);
