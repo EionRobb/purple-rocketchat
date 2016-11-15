@@ -1675,7 +1675,6 @@ rc_process_frame(RocketChatAccount *rca, const gchar *frame)
 	root = json_parser_get_root(parser);
 	
 	if (root != NULL) {
-		purple_debug_error("rocketchat", "fame type is : %c\n", frame_type);
 		if (frame_type == 'a') {
 			JsonArray *message_array = json_node_get_array(root);
 			guint i, len = json_array_get_length(message_array);
@@ -1690,13 +1689,12 @@ rc_process_frame(RocketChatAccount *rca, const gchar *frame)
 			}
 			g_object_unref(message_parser);
 		} else if (frame_type == 'o') {
-			//JsonObject *message_object = json_node_get_object(root);
-			//TODO not sure
-			purple_debug_warning("rocketchat", "object type not handled\n");
+			//Open frame
 		} else if (frame_type == 'c') {
-			//JsonObject *message_object = json_node_get_object(root);
-			//TODO not sure
+			//Close frame
 			purple_debug_error("rocketchat", "server closed the connection\n");
+		} else if (frame_type == 'h') {
+			//Heartbeat frame
 		} else {
 			//TODO is this going to happen?
 			purple_debug_error("rocketchat", "unknown frame type '%c'\n", frame_type);
