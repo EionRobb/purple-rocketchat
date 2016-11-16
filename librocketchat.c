@@ -1476,16 +1476,13 @@ rc_set_status(PurpleAccount *account, PurpleStatus *status)
 	PurpleConnection *pc = purple_account_get_connection(account);
 	RocketChatAccount *ya = purple_connection_get_protocol_data(pc);
 	
-	//["{\"msg\":\"method\",\"method\":\"UserPresence:away\",\"params\":[],\"id\":\"10\"}"]
 	JsonObject *data = json_object_new();
 	JsonArray *params = json_array_new();
-	gchar *method;
 	
 	json_object_set_string_member(data, "msg", "method");
+	json_object_set_string_member(data, "method", "UserPresence:setDefaultStatus");
 	
-	method = g_strdup_printf("UserPresence:%s", purple_status_get_id(status));
-	json_object_set_string_member(data, "method", method);
-	g_free(method);
+	json_array_add_string_element(params, purple_status_get_id(status));
 	
 	json_object_set_array_member(data, "params", params);
 	json_object_set_string_member(data, "id", rc_get_next_id_str(ya));
@@ -1493,6 +1490,25 @@ rc_set_status(PurpleAccount *account, PurpleStatus *status)
 	rc_socket_write_json(ya, data);
 }
 
+void
+rc_set_idle(PurpleConnection *pc, int time)
+{
+	RocketChatAccount *ya = purple_connection_get_protocol_data(pc);
+	JsonObject *data = json_object_new();
+	JsonArray *params = json_array_new();
+	const gchar *method = "UserPresence:away";
+	
+	if (time < 20) {
+		method = "UserPresence:online";
+	}
+	
+	json_object_set_string_member(data, "msg", "method");
+	json_object_set_string_member(data, "method", method);
+	json_object_set_array_member(data, "params", params);
+	json_object_set_string_member(data, "id", rc_get_next_id_str(ya));
+	
+	rc_socket_write_json(ya, data);
+}
 
 static void rc_start_socket(RocketChatAccount *ya);
 
@@ -3126,6 +3142,7 @@ plugin_init(PurplePlugin *plugin)
 	prpl_info->get_account_text_table = rc_get_account_text_table;
 	prpl_info->list_icon = rc_list_icon;
 	prpl_info->set_status = rc_set_status;
+	prpl_info->set_idle = rc_set_idle;
 	prpl_info->status_types = rc_status_types;
 	prpl_info->chat_info = rc_chat_info;
 	prpl_info->chat_info_defaults = rc_chat_info_defaults;
@@ -3256,6 +3273,7 @@ rc_protocol_server_iface_init(PurpleProtocolServerIface *prpl_info)
 {
 	prpl_info->add_buddy = rc_add_buddy;
 	prpl_info->set_status = rc_set_status;
+	prpl_info->set_idle = rc_set_idle;
 }
 
 static void 
