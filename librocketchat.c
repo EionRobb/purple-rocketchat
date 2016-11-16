@@ -1062,7 +1062,42 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 		response = json_object_new();
 		json_object_set_string_member(response, "msg", "pong");
 	} else if (purple_strequal(msg, "added")) {
-        rc_handle_add_new_user(ya, obj);
+		const gchar *collection = json_object_get_string_member(obj, "collection");
+		
+		if (purple_strequal(collection, "users")) {
+			rc_handle_add_new_user(ya, obj);
+			
+		} else if (purple_strequal(collection, "rocketchat_room")) {
+			const gchar *room_id = json_object_get_string_member(obj, "id");
+			JsonObject *fields = json_object_get_object_member(obj, "fields");
+			JsonArray *usernames = json_object_get_array_member(fields, "usernames");
+			gint i;
+			guint len = json_array_get_length(usernames);
+			GList *users = NULL, *flags = NULL;
+			PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(g_hash_table_lookup(ya->group_chats, room_id), ya->account);
+			
+			if (chatconv == NULL) {
+				chatconv = purple_conversations_find_chat_with_account(room_id, ya->account);
+			}
+		
+			for (i = len - 1; i >= 0; i--) {
+				const gchar *username = json_array_get_string_element(usernames, i);
+				if (username != NULL) {
+					users = g_list_prepend(users, g_strdup(username));
+					flags = g_list_prepend(flags, GINT_TO_POINTER(PURPLE_CHAT_USER_NONE));
+				}
+			}
+		
+			purple_chat_conversation_add_users(chatconv, users, NULL, flags, FALSE);
+			
+			while (users != NULL) {
+				g_free(users->data);
+				users = g_list_delete_link(users, users);
+			}
+			
+			g_list_free(users);
+			g_list_free(flags);
+		}
     } else if (purple_strequal(msg, "changed")) {
 		const gchar *collection = json_object_get_string_member(obj, "collection");
 		if (purple_strequal(collection, "users")) {
@@ -1306,44 +1341,42 @@ PurpleGroup* rc_get_or_create_default_group() {
 void rc_handle_add_new_user(RocketChatAccount *ya, JsonObject *obj) {
 	PurpleAccount* account = ya->account;
 	PurpleGroup *defaultGroup = rc_get_or_create_default_group();
-    const gchar *collection = json_object_get_string_member(obj, "collection");
 
     // a["{\"msg\":\"added\",\"collection\":\"users\",\"id\":\"hZKg86uJavE6jYLya\",\"fields\":{\"emails\":[{\"address\":\"eion@robbmob.com\",\"verified\":true}],\"username\":\"eionrobb\"}}"]
 
     //a["{\"msg\":\"added\",\"collection\":\"users\",\"id\":\"M6m6odi9ufFJtFzZ3\",\"fields\":{\"status\":\"online\",\"username\":\"ali-14\",\"utcOffset\":3.5}}"]
-    if (purple_strequal(collection, "users")) {
-		JsonObject *fields = json_object_get_object_member(obj, "fields");
-		const gchar *user_id = json_object_get_string_member(obj, "id");
-		const gchar *username = json_object_get_string_member(fields, "username");
-		const gchar *status = json_object_get_string_member(fields, "status");
-		const gchar *name = json_object_get_string_member(fields, "name");
+    
+	JsonObject *fields = json_object_get_object_member(obj, "fields");
+	const gchar *user_id = json_object_get_string_member(obj, "id");
+	const gchar *username = json_object_get_string_member(fields, "username");
+	const gchar *status = json_object_get_string_member(fields, "status");
+	const gchar *name = json_object_get_string_member(fields, "name");
 
-		if (status != NULL) {
-			purple_protocol_got_user_status(ya->account, username, status, NULL);
+	if (status != NULL) {
+		purple_protocol_got_user_status(ya->account, username, status, NULL);
+	}
+
+	if (username != NULL) {
+		g_hash_table_replace(ya->usernames_to_ids, g_strdup(username), g_strdup(user_id));
+		g_hash_table_replace(ya->ids_to_usernames, g_strdup(user_id), g_strdup(username));
+
+		if (!ya->self_user) {
+			// The first user added to the collection is us
+			ya->self_user = g_strdup(username);
+
+			purple_connection_set_display_name(ya->pc, ya->self_user);
+			rc_account_connected(ya, NULL, NULL);
+		} else if (purple_account_get_bool(account, "auto-add-buddy", FALSE)) {
+			//other user not us
+			PurpleBuddy *buddy = purple_blist_find_buddy(account, username);
+			if (buddy == NULL) {
+				buddy = purple_buddy_new(account, username, name);
+				purple_blist_add_buddy(buddy, NULL, defaultGroup, NULL);
+			}
 		}
 
-		if (username != NULL) {
-			g_hash_table_replace(ya->usernames_to_ids, g_strdup(username), g_strdup(user_id));
-			g_hash_table_replace(ya->ids_to_usernames, g_strdup(user_id), g_strdup(username));
-
-			if (!ya->self_user) {
-				// The first user added to the collection is us
-				ya->self_user = g_strdup(username);
-
-				purple_connection_set_display_name(ya->pc, ya->self_user);
-				rc_account_connected(ya, NULL, NULL);
-			} else if (purple_account_get_bool(account, "auto-add-buddy", FALSE)) {
-				//other user not us
-				PurpleBuddy *buddy = purple_blist_find_buddy(account, username);
-				if (buddy == NULL) {
-					buddy = purple_buddy_new(account, username, name);
-					purple_blist_add_buddy(buddy, NULL, defaultGroup, NULL);
-				}
-			}
-
-			if (name != NULL) {
-				purple_serv_got_alias(ya->pc, username, name);
-			}
+		if (name != NULL) {
+			purple_serv_got_alias(ya->pc, username, name);
 		}
 	}
 }
@@ -2175,6 +2208,40 @@ rc_got_users_of_room(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
 	
 		
 	PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_name, ya->account);
+	
+	if (node == NULL) {
+		// Older server without support for getUsersOfRoom
+		if (room_name != NULL) {
+			JsonObject *data = json_object_new();
+			JsonArray *params = json_array_new();
+			gchar *id;
+			gchar *room_sub_name = g_strconcat("c", room_name, NULL);
+			
+			json_object_set_string_member(data, "msg", "sub");
+			
+			id = g_strdup_printf("%012XFFFF", g_random_int());
+			json_object_set_string_member(data, "id", id);
+			g_free(id);
+			
+			json_array_add_string_element(params, room_sub_name);
+			
+			json_array_add_boolean_element(params, FALSE);
+			json_object_set_string_member(data, "name", "room");
+			json_object_set_array_member(data, "params", params);
+			
+			json_object_ref(data);
+			rc_socket_write_json(ya, data);
+			
+			// Repeat for private rooms
+			room_sub_name[0] = 'p';
+			json_array_remove_element(params, 0);
+			json_array_add_string_element(params, room_sub_name);
+			rc_socket_write_json(ya, data);
+			
+			g_free(room_sub_name);
+		}
+		return;
+	}
 	
 	if (chatconv == NULL && room_id != NULL) {
 		chatconv = purple_conversations_find_chat_with_account(room_id, ya->account);
