@@ -141,6 +141,7 @@ g_str_insensitive_hash(gconstpointer v)
 #define PURPLE_CONVERSATION(chatorim)         (chatorim == NULL ? NULL : chatorim->conv)
 #define PURPLE_IM_CONVERSATION(conv)          PURPLE_CONV_IM(conv)
 #define PURPLE_CHAT_CONVERSATION(conv)        PURPLE_CONV_CHAT(conv)
+#define purple_conversation_present_error     purple_conv_present_error
 #define purple_serv_got_joined_chat(pc, id, name)  PURPLE_CONV_CHAT(serv_got_joined_chat(pc, id, name))
 #define purple_conversations_find_chat(pc, id)  PURPLE_CONV_CHAT(purple_find_chat(pc, id))
 #define purple_serv_got_chat_in                    serv_got_chat_in
@@ -2772,18 +2773,18 @@ rc_created_direct_message_send(RocketChatAccount *ya, JsonNode *node, gpointer u
 {
 	PurpleMessage *msg = user_data;
 	JsonObject *result;
-	const gchar *who;
+	const gchar *who = purple_message_get_recipient(msg);
 	const gchar *message;
 	const gchar *room_id;
 	PurpleBuddy *buddy;
 	
 	if (node == NULL) {
-		//todo display error
+		purple_conversation_present_error(who, ya->account, _("Could not create conversation"));
+		purple_message_destroy(msg);
 		return;
 	}
 	
 	result = json_node_get_object(node);
-	who = purple_message_get_recipient(msg);
 	message = purple_message_get_contents(msg);
 	room_id = json_object_get_string_member(result, "rid");
 	buddy = purple_blist_find_buddy(ya->account, who);
