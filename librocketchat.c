@@ -179,6 +179,7 @@ purple_chat_conversation_find_user(PurpleChatConversation *chat, const char *nam
 #define PURPLE_IM_TYPING	PURPLE_TYPING
 #define PURPLE_IM_TYPED		PURPLE_TYPED
 #define purple_conversation_get_connection      purple_conversation_get_gc
+#define purple_conversation_write_system_message(conv, message, flags)  purple_conversation_write((conv), NULL, (message), ((flags) | PURPLE_MESSAGE_SYSTEM), time(NULL))
 #define purple_chat_conversation_get_id         purple_conv_chat_get_id
 #define PURPLE_CMD_FLAG_PROTOCOL_ONLY  PURPLE_CMD_FLAG_PRPL_ONLY
 #define PURPLE_IS_BUDDY                PURPLE_BLIST_NODE_IS_BUDDY
@@ -946,6 +947,29 @@ rc_account_connected(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
 	purple_connection_set_state(ya->pc, PURPLE_CONNECTION_CONNECTED);
 }
 
+static PurpleChatUserFlags
+rc_role_to_purple_flag(RocketChatAccount *ya, const gchar *role)
+{
+	//These are the built-in/protected roles
+	//TODO what about the custom roles?
+	
+	if (purple_strequal(role, "user")) {
+		
+	} else if (purple_strequal(role, "admin")) {
+		return PURPLE_CHAT_USER_OP;
+	} else if (purple_strequal(role, "moderator")) {
+		return PURPLE_CHAT_USER_HALFOP;
+	} else if (purple_strequal(role, "owner")) {
+		return PURPLE_CHAT_USER_FOUNDER;
+	} else if (purple_strequal(role, "bot")) {
+		return PURPLE_CHAT_USER_VOICE;
+	} else if (purple_strequal(role, "guest")) {
+		
+	}
+	
+	return PURPLE_CHAT_USER_NONE;
+}	
+
 
 static gint64 rc_get_room_last_timestamp(RocketChatAccount *ya, const gchar *room_id);
 static void rc_set_room_last_timestamp(RocketChatAccount *ya, const gchar *room_id, gint64 last_timestamp);
@@ -976,6 +1000,17 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message, JsonObject *
 		if (chatconv != NULL) {
 			purple_chat_conversation_add_user(chatconv, username, NULL, PURPLE_CHAT_USER_NONE, TRUE);
 		}
+	} else if (purple_strequal(t, "au")) {
+		PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_name, ya->account);
+		if (chatconv == NULL) {
+			chatconv = purple_conversations_find_chat_with_account(rid, ya->account);
+		}
+		
+		if (chatconv != NULL) {
+			gchar *message = g_strdup_printf(_("%s added %s to the chat"), username, msg_text);
+			purple_chat_conversation_add_user(chatconv, msg_text, message, PURPLE_CHAT_USER_NONE, TRUE);
+			g_free(message);
+		}
 	} else if (purple_strequal(t, "ul")) {
 		PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_name, ya->account);
 		if (chatconv == NULL) {
@@ -984,6 +1019,73 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message, JsonObject *
 		
 		if (chatconv != NULL) {
 			purple_chat_conversation_remove_user(chatconv, username, NULL);
+		}
+	} else if (purple_strequal(t, "ru")) {
+		PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_name, ya->account);
+		if (chatconv == NULL) {
+			chatconv = purple_conversations_find_chat_with_account(rid, ya->account);
+		}
+		
+		if (chatconv != NULL) {
+			gchar *message = g_strdup_printf(_("%s removed %s from the chat"), username, msg_text);
+			purple_chat_conversation_remove_user(chatconv, msg_text, message);
+			g_free(message);
+		}
+	} else if (purple_strequal(t, "subscription-role-added")) {
+		PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_name, ya->account);
+		if (chatconv == NULL) {
+			chatconv = purple_conversations_find_chat_with_account(rid, ya->account);
+		}
+		
+		if (chatconv != NULL) {
+			const gchar *role = json_object_get_string_member(message, "role");
+			PurpleChatUser *cb = purple_chat_conversation_find_user(chatconv, msg_text);
+			PurpleChatUserFlags flags;
+			if (cb == NULL) {
+				purple_chat_conversation_add_user(chatconv, msg_text, NULL, purple_chat_user_get_flags(cb), FALSE);
+			} else {
+				flags = purple_chat_user_get_flags(cb);
+				purple_chat_user_set_flags(cb, flags | rc_role_to_purple_flag(ya, role));
+			}
+		}
+	} else if (purple_strequal(t, "subscription-role-removed")) {
+		PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_name, ya->account);
+		if (chatconv == NULL) {
+			chatconv = purple_conversations_find_chat_with_account(rid, ya->account);
+		}
+		
+		if (chatconv != NULL) {
+			const gchar *role = json_object_get_string_member(message, "role");
+			PurpleChatUser *cb = purple_chat_conversation_find_user(chatconv, msg_text);
+			PurpleChatUserFlags flags;
+			if (cb == NULL) {
+				purple_chat_conversation_add_user(chatconv, msg_text, NULL, PURPLE_CHAT_USER_NONE, FALSE);
+			} else {
+				flags = purple_chat_user_get_flags(cb);
+				purple_chat_user_set_flags(cb, flags & ~rc_role_to_purple_flag(ya, role));
+			}
+		}
+	} else if (purple_strequal(t, "user-muted")) {
+		PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_name, ya->account);
+		if (chatconv == NULL) {
+			chatconv = purple_conversations_find_chat_with_account(rid, ya->account);
+		}
+		
+		if (chatconv != NULL) {
+			gchar *message = g_strdup_printf(_("%s muted %s"), username, msg_text);
+			purple_conversation_write_system_message(PURPLE_CONVERSATION(chatconv), message, PURPLE_MESSAGE_SYSTEM);
+			g_free(message);
+		}
+	} else if (purple_strequal(t, "user-unmuted")) {
+		PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_name, ya->account);
+		if (chatconv == NULL) {
+			chatconv = purple_conversations_find_chat_with_account(rid, ya->account);
+		}
+		
+		if (chatconv != NULL) {
+			gchar *message = g_strdup_printf(_("%s unmuted %s"), username, msg_text);
+			purple_conversation_write_system_message(PURPLE_CONVERSATION(chatconv), message, PURPLE_MESSAGE_SYSTEM);
+			g_free(message);
 		}
 	} else if (purple_strequal(t, "room_changed_topic")) {
 		PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_name, ya->account);
