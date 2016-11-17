@@ -2344,7 +2344,6 @@ rc_got_users_of_room(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
 			
 			json_array_add_string_element(params, room_sub_name);
 			
-			json_array_add_boolean_element(params, FALSE);
 			json_object_set_string_member(data, "name", "room");
 			json_object_set_array_member(data, "params", params);
 			
@@ -2352,9 +2351,12 @@ rc_got_users_of_room(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
 			rc_socket_write_json(ya, data);
 			
 			// Repeat for private rooms
+			id = g_strdup_printf("%012XFFFF", g_random_int());
+			json_object_set_string_member(data, "id", id);
+			g_free(id);
+			
 			room_sub_name[0] = 'p';
-			json_array_remove_element(params, 0);
-			json_array_add_string_element(params, room_sub_name);
+			json_node_set_string(json_array_get_element(params, 0), room_sub_name);
 			rc_socket_write_json(ya, data);
 			
 			g_free(room_sub_name);
