@@ -790,7 +790,6 @@ rc_fetch_url(RocketChatAccount *ya, const gchar *url, const gchar *postdata, Roc
 
 
 static void rc_join_room(RocketChatAccount *ya, const gchar *room_id);
-void rc_block_user(PurpleConnection *pc, const char *who);
 static void rc_socket_write_json(RocketChatAccount *ya, JsonObject *data);
 static GHashTable *rc_chat_info_defaults(PurpleConnection *pc, const char *chatname);
 static void rc_mark_room_messages_read(RocketChatAccount *ya, const gchar *room_id);
@@ -2238,47 +2237,23 @@ rc_start_socket(RocketChatAccount *ya)
 
 
 
-void
-rc_block_user(PurpleConnection *pc, const char *who)
-{
-	// RocketChatAccount *ya = purple_connection_get_protocol_data(pc);
-	// JsonObject *data = json_object_new();
-	
-	// json_object_set_string_member(data, "msg", "SetUserBlocked");
-	// json_object_set_string_member(data, "userId", who);
-	// json_object_set_int_member(data, "opId", ya->opid++);
-	// json_object_set_boolean_member(data, "blocked", TRUE);
-	
-	// rc_socket_write_json(ya, data);
-}
 
-void
-rc_unblock_user(PurpleConnection *pc, const char *who)
-{
-	// RocketChatAccount *ya = purple_connection_get_protocol_data(pc);
-	// JsonObject *data = json_object_new();
-	
-	// json_object_set_string_member(data, "msg", "SetUserBlocked");
-	// json_object_set_string_member(data, "userId", who);
-	// json_object_set_int_member(data, "opId", ya->opid++);
-	// json_object_set_boolean_member(data, "blocked", FALSE);
-	
-	// rc_socket_write_json(ya, data);
-}
 
 static void
 rc_chat_leave_by_room_id(PurpleConnection *pc, const gchar *room_id)
 {
-	// RocketChatAccount *ya;
-	// JsonObject *data = json_object_new();
+	RocketChatAccount *ya = purple_connection_get_protocol_data(pc);
+	JsonObject *data = json_object_new();
+	JsonArray *params = json_array_new();
 	
-	// ya = purple_connection_get_protocol_data(pc);
+	json_array_add_string_element(params, room_id);
 	
-	// json_object_set_string_member(data, "msg", "LeaveGroup");
-	// json_object_set_string_member(data, "groupId", groupId);
-	// json_object_set_int_member(data, "opId", ya->opid++);
+	json_object_set_string_member(data, "msg", "method");
+	json_object_set_string_member(data, "method", "leaveRoom");
+	json_object_set_array_member(data, "params", params);
+	json_object_set_string_member(data, "id", rc_get_next_id_str(ya));
 	
-	// rc_socket_write_json(ya, data);
+	rc_socket_write_json(ya, data);
 }
 
 static void
@@ -3221,7 +3196,7 @@ rc_add_account_options(GList *account_options)
 }
 
 static PurpleCmdRet
-rc_cmd_leave(PurpleConversation *conv, const gchar *cmd, gchar **args, gchar **error, void *data)
+rc_cmd_leave(PurpleConversation *conv, const gchar *cmd, gchar **args, gchar **error, gpointer data)
 {
 	PurpleConnection *pc = NULL;
 	int id = -1;
@@ -3237,15 +3212,144 @@ rc_cmd_leave(PurpleConversation *conv, const gchar *cmd, gchar **args, gchar **e
 	return PURPLE_CMD_RET_OK;
 }
 
+static PurpleCmdRet
+rc_slash_command(PurpleConversation *conv, const gchar *cmd, gchar **args, gchar **error, gpointer userdata)
+{
+	PurpleConnection *pc = NULL;
+	RocketChatAccount *ya = NULL;
+	const gchar *room_id = NULL;
+	JsonObject *data;
+	JsonArray *params;
+	JsonObject *slash_param;
+	JsonObject *msg;
+	gchar *params_str;
+	gchar *original_msg;
+	gchar *_id;
+	
+	pc = purple_conversation_get_connection(conv);
+	if (pc == NULL) {
+		return PURPLE_CMD_RET_FAILED;
+	}
+	ya = purple_connection_get_protocol_data(pc);
+	if (ya == NULL) {
+		return PURPLE_CMD_RET_FAILED;
+	}
+	
+	room_id = purple_conversation_get_data(conv, "id");
+	if (room_id == NULL) {
+		if (PURPLE_IS_IM_CONVERSATION(conv)) {
+			room_id = g_hash_table_lookup(ya->one_to_ones_rev, purple_conversation_get_name(conv));
+		} else {
+			room_id = purple_conversation_get_name(conv);
+			if (g_hash_table_lookup(ya->group_chats_rev, room_id)) {
+				// Convert friendly name into id
+				room_id = g_hash_table_lookup(ya->group_chats_rev, room_id);
+			}
+		}
+	}
+	if (room_id == NULL) {
+		return PURPLE_CMD_RET_FAILED;
+	}
+	
+	//["{\"msg\":\"method\",\"method\":\"slashCommand\",\"params\":[{\"cmd\":\"lennyface\",\"params\":\"all the stuff\",\"msg\":{\"_id\":\"ANLQgCTo33wGcjXZT\",\"rid\":\"YdpayxcMhWFGKRZb3hZKg86uJavE6jYLya\",\"msg\":\"/lennyface all the stuff\"}}],\"id\":\"65\"}"]
+	
+	data = json_object_new();
+	params = json_array_new();
+	slash_param = json_object_new();
+	msg = json_object_new();
+	
+	
+	json_object_set_string_member(slash_param, "cmd", cmd);
+	
+	params_str = g_strjoinv(" ", args);
+	original_msg = g_strconcat(cmd, " ", params_str, NULL);
+	json_object_set_string_member(slash_param, "params", params_str);
+	g_free(params_str);
+	
+	_id = g_strdup_printf("%012XFFFF", g_random_int());
+	json_object_set_string_member(msg, "_id", _id);
+	g_free(_id);
+	json_object_set_string_member(msg, "rid", room_id);
+	json_object_set_string_member(msg, "msg", original_msg);
+	g_free(original_msg);
+	
+	json_object_set_object_member(slash_param, "msg", msg);
+	json_array_add_object_element(params, slash_param);
+	
+	json_object_set_string_member(data, "msg", "method");
+	json_object_set_string_member(data, "method", "slashCommand");
+	json_object_set_array_member(data, "params", params);
+	json_object_set_string_member(data, "id", rc_get_next_id_str(ya));
+	
+	json_object_ref(data);
+	rc_socket_write_json(ya, data);
+	
+	// Send the same request again without the second parameter for older servers
+	json_array_remove_element(params, 1);
+	rc_socket_write_json(ya, data);
+	
+	return PURPLE_CMD_RET_OK;
+}
+
 static gboolean
 plugin_load(PurplePlugin *plugin, GError **error)
 {
 	//["{\"msg\":\"method\",\"method\":\"slashCommand\",\"params\":[{\"cmd\":\"join\",\"params\":\"#general \",\"msg\":{\"_id\":\"FLpX4en75muW3raxH\",\"rid\":\"hZKg86uJavE6jYLyaoAKZSpTPTQHbp6nBD\",\"msg\":\"/join #general \"}}],\"id\":\"19\"}"]
+						
+	purple_cmd_register("create", "s", PURPLE_CMD_P_PLUGIN, PURPLE_CMD_FLAG_CHAT | PURPLE_CMD_FLAG_IM |
+						PURPLE_CMD_FLAG_PROTOCOL_ONLY | PURPLE_CMD_FLAG_ALLOW_WRONG_ARGS,
+						ROCKETCHAT_PLUGIN_ID, rc_slash_command,
+						_("create <name>:  Create a new channel"), NULL);
+						
+	purple_cmd_register("invite", "s", PURPLE_CMD_P_PLUGIN, PURPLE_CMD_FLAG_CHAT |
+						PURPLE_CMD_FLAG_PROTOCOL_ONLY | PURPLE_CMD_FLAG_ALLOW_WRONG_ARGS,
+						ROCKETCHAT_PLUGIN_ID, rc_slash_command,
+						_("invite <username>:  Invite user to join channel"), NULL);
+						
+	purple_cmd_register("join", "s", PURPLE_CMD_P_PLUGIN, PURPLE_CMD_FLAG_CHAT | PURPLE_CMD_FLAG_IM |
+						PURPLE_CMD_FLAG_PROTOCOL_ONLY | PURPLE_CMD_FLAG_ALLOW_WRONG_ARGS,
+						ROCKETCHAT_PLUGIN_ID, rc_slash_command,
+						_("join <name>:  Join a channel"), NULL);
+						
+	purple_cmd_register("kick", "s", PURPLE_CMD_P_PLUGIN, PURPLE_CMD_FLAG_CHAT |
+						PURPLE_CMD_FLAG_PROTOCOL_ONLY | PURPLE_CMD_FLAG_ALLOW_WRONG_ARGS,
+						ROCKETCHAT_PLUGIN_ID, rc_slash_command,
+						_("kick <username>:  Remove someone from channel"), NULL);
 	
 	purple_cmd_register("leave", "", PURPLE_CMD_P_PLUGIN, PURPLE_CMD_FLAG_CHAT |
 						PURPLE_CMD_FLAG_PROTOCOL_ONLY | PURPLE_CMD_FLAG_ALLOW_WRONG_ARGS,
 						ROCKETCHAT_PLUGIN_ID, rc_cmd_leave,
-						_("leave:  Leave the group chat"), NULL);
+						_("leave:  Leave the channel"), NULL);
+	
+	purple_cmd_register("part", "", PURPLE_CMD_P_PLUGIN, PURPLE_CMD_FLAG_CHAT |
+						PURPLE_CMD_FLAG_PROTOCOL_ONLY | PURPLE_CMD_FLAG_ALLOW_WRONG_ARGS,
+						ROCKETCHAT_PLUGIN_ID, rc_cmd_leave,
+						_("part:  Leave the channel"), NULL);
+	
+	purple_cmd_register("me", "s", PURPLE_CMD_P_PLUGIN, PURPLE_CMD_FLAG_CHAT | PURPLE_CMD_FLAG_IM |
+						PURPLE_CMD_FLAG_PROTOCOL_ONLY | PURPLE_CMD_FLAG_ALLOW_WRONG_ARGS,
+						ROCKETCHAT_PLUGIN_ID, rc_slash_command,
+						_("me <action>:  Display action text"), NULL);
+	
+	purple_cmd_register("msg", "ss", PURPLE_CMD_P_PLUGIN, PURPLE_CMD_FLAG_CHAT | PURPLE_CMD_FLAG_IM |
+						PURPLE_CMD_FLAG_PROTOCOL_ONLY | PURPLE_CMD_FLAG_ALLOW_WRONG_ARGS,
+						ROCKETCHAT_PLUGIN_ID, rc_slash_command,
+						_("msg <username> <message>:  Direct message someone"), NULL);
+	
+	purple_cmd_register("mute", "s", PURPLE_CMD_P_PLUGIN, PURPLE_CMD_FLAG_CHAT |
+						PURPLE_CMD_FLAG_PROTOCOL_ONLY | PURPLE_CMD_FLAG_ALLOW_WRONG_ARGS,
+						ROCKETCHAT_PLUGIN_ID, rc_slash_command,
+						_("mute <username>:  Mute someone in channel"), NULL);
+	
+	purple_cmd_register("unmute", "s", PURPLE_CMD_P_PLUGIN, PURPLE_CMD_FLAG_CHAT |
+						PURPLE_CMD_FLAG_PROTOCOL_ONLY | PURPLE_CMD_FLAG_ALLOW_WRONG_ARGS,
+						ROCKETCHAT_PLUGIN_ID, rc_slash_command,
+						_("unmute <username>:  Un-mute someone in channel"), NULL);
+	
+	purple_cmd_register("topic", "s", PURPLE_CMD_P_PLUGIN, PURPLE_CMD_FLAG_CHAT |
+						PURPLE_CMD_FLAG_PROTOCOL_ONLY | PURPLE_CMD_FLAG_ALLOW_WRONG_ARGS,
+						ROCKETCHAT_PLUGIN_ID, rc_slash_command,
+						_("topic <description>:  Set the channel topic description"), NULL);
 	
 	return TRUE;
 }
@@ -3320,8 +3424,6 @@ plugin_init(PurplePlugin *plugin)
 	prpl_info->close = rc_close;
 	prpl_info->send_im = rc_send_im;
 	prpl_info->send_typing = rc_send_typing;
-	// prpl_info->add_deny = rc_block_user;
-	// prpl_info->rem_deny = rc_unblock_user;
 	prpl_info->join_chat = rc_join_chat;
 	prpl_info->get_chat_name = rc_get_chat_name;
 	prpl_info->chat_invite = rc_chat_invite;
@@ -3412,13 +3514,6 @@ rc_protocol_class_init(PurpleProtocolClass *prpl_info)
 	prpl_info->list_icon = rc_list_icon;
 }
 
-static void
-rc_protocol_privacy_iface_init(PurpleProtocolPrivacyIface *prpl_info)
-{
-	prpl_info->add_deny = rc_block_user;
-	prpl_info->rem_deny = rc_unblock_user;
-}
-
 static void 
 rc_protocol_im_iface_init(PurpleProtocolIMIface *prpl_info)
 {
@@ -3469,9 +3564,6 @@ PURPLE_DEFINE_TYPE_EXTENDED(
 
 	PURPLE_IMPLEMENT_INTERFACE_STATIC(PURPLE_TYPE_PROTOCOL_CHAT_IFACE,
 	                                  rc_protocol_chat_iface_init)
-
-	PURPLE_IMPLEMENT_INTERFACE_STATIC(PURPLE_TYPE_PROTOCOL_PRIVACY_IFACE,
-	                                  rc_protocol_privacy_iface_init)
 
 	PURPLE_IMPLEMENT_INTERFACE_STATIC(PURPLE_TYPE_PROTOCOL_SERVER_IFACE,
 	                                  rc_protocol_server_iface_init)
