@@ -173,7 +173,7 @@ purple_chat_conversation_find_user(PurpleChatConversation *chat, const char *nam
 }
 #define purple_chat_user_get_flags(cb)     purple_conv_chat_user_get_flags(g_dataset_get_data((cb), "chat"), (cb)->name)
 #define purple_chat_user_set_flags(cb, f)  purple_conv_chat_user_set_flags(g_dataset_get_data((cb), "chat"), (cb)->name, (f))
-#define purple_chat_user_set_alias(cb, a)  ((cb)->alias = (a))
+#define purple_chat_user_set_alias(cb, a)  (g_free((cb)->alias), (cb)->alias = g_strdup(a))
 #define PurpleIMTypingState	PurpleTypingState
 #define PURPLE_IM_NOT_TYPING	PURPLE_NOT_TYPING
 #define PURPLE_IM_TYPING	PURPLE_TYPING
@@ -231,6 +231,8 @@ purple_message_destroy(PurpleMessage *message)
 #define purple_conversation_set_data(conv, key, value)  g_object_set_data(G_OBJECT(conv), key, value)
 #define purple_conversation_get_data(conv, key)         g_object_get_data(G_OBJECT(conv), key)
 #define purple_message_destroy          g_object_unref
+#define purple_chat_user_set_alias(cb, alias)  g_object_set((cb), "alias", (alias), NULL)
+#define purple_chat_get_alias(chat)  g_object_get_data(G_OBJECT(chat), "alias")
 #endif
 
 
@@ -1143,11 +1145,34 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message_obj, JsonObje
 			}
 			
 			if ((roomType != NULL && *roomType != 'd') || g_hash_table_contains(ya->group_chats, rid)) {
+				PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_name, ya->account);
+				PurpleChatUser *cb;
+				
+				if (chatconv == NULL) {
+					chatconv = purple_conversations_find_chat_with_account(rid, ya->account);
+				}
+				
+				cb = purple_chat_conversation_find_user(chatconv, username);
+				if (cb == NULL) {
+					purple_chat_conversation_add_user(chatconv, username, NULL, PURPLE_CHAT_USER_NONE, FALSE);
+					cb = purple_chat_conversation_find_user(chatconv, username);
+				}
+				
+				
+				if (json_object_has_member(message_obj, "bot") && json_object_has_member(message_obj, "alias")) {
+					const gchar *alias = json_object_get_string_member(message_obj, "alias");
+					purple_chat_user_set_alias(cb, alias);
+				}
+				
 				// Group chat message
 				purple_serv_got_chat_in(ya->pc, g_str_hash(rid), username, msg_flags, message, timestamp);
 				
 				if (purple_conversation_has_focus(PURPLE_CONVERSATION(purple_conversations_find_chat_with_account(room_name ? room_name : rid, ya->account)))) {
 					rc_mark_room_messages_read(ya, rid);
+				}
+				
+				if (json_object_has_member(message_obj, "bot") && json_object_has_member(message_obj, "alias")) {
+					purple_chat_user_set_alias(cb, NULL);
 				}
 				
 			} else {
