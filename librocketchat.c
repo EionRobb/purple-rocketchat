@@ -1136,7 +1136,7 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message_obj, JsonObje
 					const gchar *title_link = json_object_get_string_member(attachment, "title_link");
 					
 					if (title != NULL && title_link != NULL) {
-						gchar *temp_message = g_strdup_printf("%s <a href=\"%s%s\">%s</a>", message, ya->server, title_link, title);
+						gchar *temp_message = g_strdup_printf("%s <a href=\"https://%s%s\">%s</a>", (message ? message : ""), ya->server, title_link, title);
 						g_free(message);
 						message = temp_message;
 					}
