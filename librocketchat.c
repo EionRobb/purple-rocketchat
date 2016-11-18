@@ -820,28 +820,29 @@ static void
 rc_got_open_rooms(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
 {
 	//a["{\"msg\":\"result\",\"id\":\"9\",\"result\":{\"update\":[{\"_id\":\"GENERAL\",\"name\":\"general\",\"t\":\"c\",\"topic\":\"Community support in [#support](https://demo.rocket.chat/channel/support).  Developers in [#dev](https://demo.rocket.chat/channel/dev)\",\"muted\":[\"daly\",\"kkloggg\",\"staci.holmes.segarra\"],\"jitsiTimeout\":{\"$date\":1476781304981},\"default\":true},{\"_id\":\"YdpayxcMhWFGKRZb3hZKg86uJavE6jYLya\",\"t\":\"d\"},{\"_id\":\"hZKg86uJavE6jYLyavxiySsLD8gLjgnmnN\",\"t\":\"d\"},{\"_id\":\"2urrp3DyDkLxoMAd3hZKg86uJavE6jYLya\",\"t\":\"d\"},{\"_id\":\"QFhAaDzea7cFK6ChB\",\"name\":\"test-private\",\"t\":\"p\",\"u\":{\"_id\":null,\"username\":null},\"ro\":false},{\"_id\":\"b98BYkRbiD5swDfyY\",\"name\":\"dev\",\"t\":\"c\",\"u\":{\"_id\":\"yhHvK7uhhXh9DqKWH\",\"username\":\"diego.sampaio\"},\"topic\":\"Community and core devs hangout.  Learn code in [#learn](https://demo.rocket.chat/channel/learn).  Get support in [#support](https://demo.rocket.chat/channel/support)\",\"muted\":[\"geektest123\"],\"jitsiTimeout\":{\"$date\":1465876457842}},{\"_id\":\"JoxbibGnXizRb4ef4hZKg86uJavE6jYLya\",\"t\":\"d\"}],\"remove\":[{\"_id\":\"8cXLWPathApTRXHZZ\",\"_deletedAt\":{\"$date\":1477179315230}}]}}"]
-	
-	JsonObject *result = json_node_get_object(node);
-	JsonArray *update = json_object_get_array_member(result, "update");
-	gint i, len = json_array_get_length(update);
-	
-	for(i = 0; i < len; i++) {
-		JsonObject *room_info = json_array_get_object_element(update, i);
-		const gchar *room_type = json_object_get_string_member(room_info, "t");
+	if (node!=NULL) {
+		JsonObject *result = json_node_get_object(node);
+		JsonArray *update = json_object_get_array_member(result, "update");
+		gint i, len = json_array_get_length(update);
 		
-		if (*room_type != 'd') {
-			const gchar *topic = json_object_get_string_member(room_info, "topic");
-			const gchar *room_name = json_object_get_string_member(room_info, "name");
-			PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_name, ya->account);
-			if (chatconv == NULL) {
-				const gchar *room_id = json_object_get_string_member(room_info, "_id");
-				chatconv = purple_conversations_find_chat_with_account(room_id, ya->account);
-			}
-
-			if (chatconv != NULL && topic != NULL) {
-				gchar *html_topic = rc_markdown_to_html(topic);
-				purple_chat_conversation_set_topic(chatconv, NULL, html_topic);
-				g_free(html_topic);
+		for (i = 0; i < len; i++) {
+			JsonObject *room_info = json_array_get_object_element(update, i);
+			const gchar *room_type = json_object_get_string_member(room_info, "t");
+			
+			if (*room_type != 'd') {
+				const gchar *topic = json_object_get_string_member(room_info, "topic");
+				const gchar *room_name = json_object_get_string_member(room_info, "name");
+				PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_name, ya->account);
+				if (chatconv == NULL) {
+					const gchar *room_id = json_object_get_string_member(room_info, "_id");
+					chatconv = purple_conversations_find_chat_with_account(room_id, ya->account);
+				}
+				
+				if (chatconv != NULL && topic != NULL) {
+					gchar *html_topic = rc_markdown_to_html(topic);
+					purple_chat_conversation_set_topic(chatconv, NULL, html_topic);
+					g_free(html_topic);
+				}
 			}
 		}
 	}
@@ -1410,7 +1411,6 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 	} else if (purple_strequal(msg, "failed")) {
 		purple_connection_error(ya->pc, PURPLE_CONNECTION_ERROR_NETWORK_ERROR, "Failed to connect to server");
 	}
-	
 	if (!json_object_has_member(obj, "msg") && json_object_has_member(obj, "server_id")) {
 		JsonArray *support = json_array_new();
 		//["{\"msg\":\"connect\",\"version\":\"1\",\"support\":[\"1\",\"pre2\",\"pre1\"]}"]
@@ -2903,7 +2903,6 @@ rc_created_direct_message_send(RocketChatAccount *ya, JsonNode *node, gpointer u
 		purple_message_destroy(msg);
 		return;
 	}
-	
 	result = json_node_get_object(node);
 	message = purple_message_get_contents(msg);
 	room_id = json_object_get_string_member(result, "rid");
@@ -3037,17 +3036,19 @@ rc_chat_set_topic(PurpleConnection *pc, int id, const char *topic)
 static void
 rc_got_avatar(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
 {
-	JsonObject *response = json_node_get_object(node);
-	PurpleBuddy *buddy = user_data;
-	const gchar *response_str;
-	gsize response_len;
-	gpointer response_dup;
-	
-	response_str = g_dataset_get_data(node, "raw_body");
-	response_len = json_object_get_int_member(response, "len");
-	response_dup = g_memdup(response_str, response_len);
-	
-	purple_buddy_icons_set_for_user(ya->account, purple_buddy_get_name(buddy), response_dup, response_len, NULL);
+	if (node != NULL) {
+		JsonObject *response = json_node_get_object(node);
+		PurpleBuddy *buddy = user_data;
+		const gchar *response_str;
+		gsize response_len;
+		gpointer response_dup;
+		
+		response_str = g_dataset_get_data(node, "raw_body");
+		response_len = json_object_get_int_member(response, "len");
+		response_dup = g_memdup(response_str, response_len);
+		
+		purple_buddy_icons_set_for_user(ya->account, purple_buddy_get_name(buddy), response_dup, response_len, NULL);
+	}
 }
 
 static void
