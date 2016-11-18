@@ -1062,7 +1062,7 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message_obj, JsonObje
 			PurpleChatUser *cb = purple_chat_conversation_find_user(chatconv, msg_text);
 			PurpleChatUserFlags flags;
 			if (cb == NULL) {
-				purple_chat_conversation_add_user(chatconv, msg_text, NULL, purple_chat_user_get_flags(cb), FALSE);
+				purple_chat_conversation_add_user(chatconv, msg_text, NULL, rc_role_to_purple_flag(ya, role), FALSE);
 			} else {
 				flags = purple_chat_user_get_flags(cb);
 				purple_chat_user_set_flags(cb, flags | rc_role_to_purple_flag(ya, role));
@@ -1075,7 +1075,7 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message_obj, JsonObje
 		}
 		
 		if (chatconv != NULL) {
-			const gchar *role = json_object_get_string_member(message, "role");
+			const gchar *role = json_object_get_string_member(message_obj, "role");
 			PurpleChatUser *cb = purple_chat_conversation_find_user(chatconv, msg_text);
 			PurpleChatUserFlags flags;
 			if (cb == NULL) {
