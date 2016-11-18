@@ -267,6 +267,7 @@ typedef struct {
 	GHashTable *result_callbacks; // Result ID -> Callback function
 	GHashTable *usernames_to_ids; // username -> user id
 	GHashTable *ids_to_usernames; // user id -> username
+	GQueue *received_message_queue; // A store of the last 10 received message id's for de-dup
 
 	GSList *http_conns; /**< PurpleHttpConnection to be cancelled on logout */
 	gint frames_since_reconnect;
@@ -974,16 +975,33 @@ rc_role_to_purple_flag(RocketChatAccount *ya, const gchar *role)
 static gint64 rc_get_room_last_timestamp(RocketChatAccount *ya, const gchar *room_id);
 static void rc_set_room_last_timestamp(RocketChatAccount *ya, const gchar *room_id, gint64 last_timestamp);
 
-static gint64
-rc_process_room_message(RocketChatAccount *ya, JsonObject *message, JsonObject *roomarg)
+static gboolean
+rc_have_seen_message_id(RocketChatAccount *ya, const gchar *message_id)
 {
-	JsonObject *ts = json_object_get_object_member(message, "ts");
-	JsonObject *u = json_object_get_object_member(message, "u");
+	guint message_hash = g_str_hash(message_id);
+	gpointer message_hash_ptr = GINT_TO_POINTER(message_hash);
 	
-	const gchar *_id = json_object_get_string_member(message, "_id");
-	const gchar *msg_text = json_object_get_string_member(message, "msg");
-	const gchar *rid = json_object_get_string_member(message, "rid");
-	const gchar *t = json_object_get_string_member(message, "t");
+	if (g_queue_find(ya->received_message_queue, message_hash_ptr)) {
+		return TRUE;
+	}
+	
+	g_queue_push_head(ya->received_message_queue, message_hash_ptr);
+	g_queue_pop_nth(ya->received_message_queue, 10);
+	
+	return FALSE;
+}
+
+
+static gint64
+rc_process_room_message(RocketChatAccount *ya, JsonObject *message_obj, JsonObject *roomarg)
+{
+	JsonObject *ts = json_object_get_object_member(message_obj, "ts");
+	JsonObject *u = json_object_get_object_member(message_obj, "u");
+	
+	const gchar *_id = json_object_get_string_member(message_obj, "_id");
+	const gchar *msg_text = json_object_get_string_member(message_obj, "msg");
+	const gchar *rid = json_object_get_string_member(message_obj, "rid");
+	const gchar *t = json_object_get_string_member(message_obj, "t");
 	const gchar *username = json_object_get_string_member(u, "username");
 	const gchar *roomType = json_object_get_string_member(roomarg, "roomType");
 	const gchar *room_name = g_hash_table_lookup(ya->group_chats, rid);
@@ -1038,7 +1056,7 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message, JsonObject *
 		}
 		
 		if (chatconv != NULL) {
-			const gchar *role = json_object_get_string_member(message, "role");
+			const gchar *role = json_object_get_string_member(message_obj, "role");
 			PurpleChatUser *cb = purple_chat_conversation_find_user(chatconv, msg_text);
 			PurpleChatUserFlags flags;
 			if (cb == NULL) {
@@ -1098,11 +1116,14 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message, JsonObject *
 			purple_chat_conversation_set_topic(chatconv, NULL, html_topic);
 			g_free(html_topic);
 		}
-	} else {
-		gchar *message = rc_markdown_to_html(msg_text);
+	} else if (!rc_have_seen_message_id(ya, _id) || json_object_has_member(message_obj, "editedBy")) {
+		// Dont display duplicate messages (eg where the server inspects urls to give icons/header/content)
+		//  but do display edited messages
 		
-		// check we didn't send this
+		// check we didn't send this ourselves
 		if (msg_flags == PURPLE_MESSAGE_RECV || !g_hash_table_remove(ya->sent_message_ids, _id)) {
+			gchar *message = rc_markdown_to_html(msg_text);
+			
 			if ((roomType != NULL && *roomType != 'd') || g_hash_table_contains(ya->group_chats, rid)) {
 				// Group chat message
 				purple_serv_got_chat_in(ya->pc, g_str_hash(rid), username, msg_flags, message, timestamp);
@@ -1138,9 +1159,10 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message, JsonObject *
 					purple_message_destroy(pmsg);
 				}
 			}
+			
+			g_free(message);
 		}
 		
-		g_free(message);
 	}
 	
 	return sdate;
@@ -1716,6 +1738,7 @@ rc_login(PurpleAccount *account)
 	ya->result_callbacks = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
 	ya->usernames_to_ids = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
 	ya->ids_to_usernames = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+	ya->received_message_queue = g_queue_new();
 	
 	userparts = g_strsplit(username, (char[2]) {RC_SERVER_SPLIT_CHAR, '\0'}, 2);
 	purple_connection_set_display_name(pc, userparts[0]);
@@ -1770,6 +1793,7 @@ rc_close(PurpleConnection *pc)
 	g_hash_table_unref(ya->usernames_to_ids);
 	g_hash_table_remove_all(ya->ids_to_usernames);
 	g_hash_table_unref(ya->ids_to_usernames);
+	g_queue_free(ya->received_message_queue);
 
 	while (ya->http_conns) {
 #	if !PURPLE_VERSION_CHECK(3, 0, 0)
