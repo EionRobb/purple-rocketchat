@@ -1158,7 +1158,6 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message_obj, JsonObje
 					cb = purple_chat_conversation_find_user(chatconv, username);
 				}
 				
-				
 				if (json_object_has_member(message_obj, "bot") && json_object_has_member(message_obj, "alias")) {
 					const gchar *alias = json_object_get_string_member(message_obj, "alias");
 					purple_chat_user_set_alias(cb, alias);
@@ -2486,7 +2485,7 @@ rc_got_history_of_room(RocketChatAccount *ya, JsonNode *node, gpointer user_data
 		JsonObject *ts = json_object_get_object_member(message, "ts");
 		gint64 sdate = json_object_get_int_member(ts, "$date");
 		
-		if (last_message > sdate) {
+		if (last_message >= sdate) {
 			continue;
 		}
 		
