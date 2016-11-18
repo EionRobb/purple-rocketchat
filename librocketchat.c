@@ -1124,6 +1124,24 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message_obj, JsonObje
 		if (msg_flags == PURPLE_MESSAGE_RECV || !g_hash_table_remove(ya->sent_message_ids, _id)) {
 			gchar *message = rc_markdown_to_html(msg_text);
 			
+			if (json_object_has_member(message_obj, "attachments")) {
+				JsonArray *attachments = json_object_get_array_member(message_obj, "attachments");
+				guint i, len = json_array_get_length(attachments);
+				
+				for (i = 0; i < len; i++) {
+					JsonObject *attachment = json_array_get_object_element(attachments, i);
+					const gchar *title = json_object_get_string_member(attachment, "title");
+					const gchar *title_link = json_object_get_string_member(attachment, "title_link");
+					
+					if (title != NULL && title_link != NULL) {
+						gchar *temp_message = g_strdup_printf("%s <a href=\"%s%s\">%s</a>", message, ya->server, title_link, title);
+						g_free(message);
+						message = temp_message;
+					}
+					// TODO inline images?
+				}
+			}
+			
 			if ((roomType != NULL && *roomType != 'd') || g_hash_table_contains(ya->group_chats, rid)) {
 				// Group chat message
 				purple_serv_got_chat_in(ya->pc, g_str_hash(rid), username, msg_flags, message, timestamp);
