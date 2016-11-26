@@ -1851,6 +1851,8 @@ rc_close(PurpleConnection *pc)
 	}
 	
 	g_hash_table_destroy(ya->cookie_table); ya->cookie_table = NULL;
+	g_free(ya->username); ya->username = NULL;
+	g_free(ya->server); ya->server = NULL;
 	g_free(ya->frame); ya->frame = NULL;
 	g_free(ya->session_token); ya->session_token = NULL;
 	g_free(ya->channel); ya->channel = NULL;
@@ -2705,8 +2707,10 @@ rc_join_chat(PurpleConnection *pc, GHashTable *chatdata)
 	
 	purple_conversation_present(PURPLE_CONVERSATION(chatconv));
 	
-	g_hash_table_replace(ya->group_chats, g_strdup(id), name ? g_strdup(name) : NULL);
-	if (name != NULL) {
+	if (!g_hash_table_contains(ya->group_chats, id)) {
+		g_hash_table_replace(ya->group_chats, g_strdup(id), name ? g_strdup(name) : NULL);
+	}
+	if (name != NULL && !g_hash_table_contains(ya->group_chats_rev, name)) {
 		g_hash_table_replace(ya->group_chats_rev, g_strdup(name), id ? g_strdup(id) : NULL);
 	}
 	
