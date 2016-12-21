@@ -22,6 +22,16 @@ hg clone https://bitbucket.org/EionRobb/purple-rocketchat/ && cd purple-rocketch
 make && sudo make install
 ```
 
+### Fedora-based distros ###
+Run the following commands from a terminal
+
+```
+#!sh
+dnf install libpurple-devel.x86_64 libmarkdown-devel.x86_64 json-glib-devel.x86_64 glib2.x86_64
+hg clone https://bitbucket.org/EionRobb/purple-rocketchat/ && cd purple-rocketchat;
+make && sudo make install
+```
+
 ## Windows Builds ##
 Windows nightly builds at https://eion.robbmob.com/librocketchat.dll - copy to Program Files\Pidgin\plugins
 
