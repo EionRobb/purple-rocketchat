@@ -85,10 +85,10 @@ librocketchat3.so: $(PURPLE_C_FILES)
 	$(CC) -fPIC $(CFLAGS) -shared -o $@ $^ $(LDFLAGS) `$(PKG_CONFIG) purple-3 glib-2.0 json-glib-1.0 --libs --cflags` $(INCLUDES)  -g -ggdb -lmarkdown
 
 librocketchat.dll: $(PURPLE_C_FILES) $(PURPLE_COMPAT_FILES)
-	$(WIN32_CC) -shared -o $@ $^ $(WIN32_PIDGIN2_CFLAGS) $(WIN32_PIDGIN2_LDFLAGS) -Ipurple2compat
+	$(WIN32_CC) -O0 -g -ggdb -shared -o $@ $^ $(WIN32_PIDGIN2_CFLAGS) $(WIN32_PIDGIN2_LDFLAGS) -Ipurple2compat
 
 librocketchat3.dll: $(PURPLE_C_FILES) $(PURPLE_COMPAT_FILES)
-	$(WIN32_CC) -shared -o $@ $^ $(WIN32_PIDGIN3_CFLAGS) $(WIN32_PIDGIN3_LDFLAGS)
+	$(WIN32_CC) -O0 -g -ggdb -shared -o $@ $^ $(WIN32_PIDGIN3_CFLAGS) $(WIN32_PIDGIN3_LDFLAGS)
 
 install: $(ROCKETCHAT_TARGET) install-icons
 	mkdir -p $(ROCKETCHAT_DEST)

@@ -1628,6 +1628,7 @@ rc_roomlist_get_list(PurpleConnection *pc)
 		
 		// Send the same request again without the second parameter for older servers
 		json_array_remove_element(params, 1);
+		json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_roomlist_got_list, roomlist));
 		rc_socket_write_json(ya, data);
 	}
 	
