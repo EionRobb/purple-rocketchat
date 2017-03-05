@@ -52,6 +52,8 @@ g_str_insensitive_hash(gconstpointer v)
 
 #include <json-glib/json-glib.h>
 // Supress overzealous json-glib 'critical errors'
+#define json_object_has_member(JSON_OBJECT, MEMBER) \
+	(JSON_OBJECT ? json_object_has_member(JSON_OBJECT, MEMBER) : FALSE)
 #define json_object_get_int_member(JSON_OBJECT, MEMBER) \
 	(json_object_has_member(JSON_OBJECT, MEMBER) ? json_object_get_int_member(JSON_OBJECT, MEMBER) : 0)
 #define json_object_get_string_member(JSON_OBJECT, MEMBER) \
@@ -62,6 +64,9 @@ g_str_insensitive_hash(gconstpointer v)
 	(json_object_has_member(JSON_OBJECT, MEMBER) ? json_object_get_object_member(JSON_OBJECT, MEMBER) : NULL)
 #define json_object_get_boolean_member(JSON_OBJECT, MEMBER) \
 	(json_object_has_member(JSON_OBJECT, MEMBER) ? json_object_get_boolean_member(JSON_OBJECT, MEMBER) : FALSE)
+
+#define json_array_get_length(JSON_ARRAY) \
+	(JSON_ARRAY ? json_array_get_length(JSON_ARRAY) : 0)
 
 
 // static void
@@ -236,6 +241,7 @@ purple_message_destroy(PurpleMessage *message)
 #endif
 
 
+
 typedef struct {
 	PurpleAccount *account;
 	PurpleConnection *pc;
@@ -332,6 +338,7 @@ rc_markdown_to_html(const gchar *markdown)
 	int flags = MKD_NOPANTS | MKD_NODIVQUOTE | MKD_NODLIST;
 	
 	if (markdown_str != NULL) {
+		// if libmarkdown is pre-2.2.2 and we're using amalloc, don't free()
 		free(markdown_str);
 	}
 	
@@ -831,7 +838,7 @@ rc_got_open_rooms(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
 			JsonObject *room_info = json_array_get_object_element(update, i);
 			const gchar *room_type = json_object_get_string_member(room_info, "t");
 			
-			if (*room_type != 'd') {
+			if (room_type && *room_type != 'd') {
 				const gchar *topic = json_object_get_string_member(room_info, "topic");
 				const gchar *room_name = json_object_get_string_member(room_info, "name");
 				PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_name, ya->account);
@@ -1380,7 +1387,7 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 				const gchar *room_type = json_object_get_string_member(room_info, "t");
 				gboolean new_room = FALSE;
 				
-				if (*room_type == 'd') {
+				if (room_type && *room_type == 'd') {
 					// Direct message
 					if (!g_hash_table_contains(ya->one_to_ones, room_id)) {
 						g_hash_table_replace(ya->one_to_ones, g_strdup(room_id), g_strdup(name));
@@ -1493,14 +1500,14 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 
 PurpleGroup* rc_get_or_create_default_group() {
     PurpleGroup *rc_group = NULL;
-    if (rc_group == NULL) {
-		rc_group = purple_blist_find_group(_("Rocket.Chat"));
-		if (!rc_group)
-		{
-			rc_group = purple_group_new(_("Rocket.Chat"));
-			purple_blist_add_group(rc_group, NULL);
-		}
+	
+	rc_group = purple_blist_find_group(_("Rocket.Chat"));
+	if (!rc_group)
+	{
+		rc_group = purple_group_new(_("Rocket.Chat"));
+		purple_blist_add_group(rc_group, NULL);
 	}
+	
     return rc_group;
 }
 
@@ -1565,7 +1572,7 @@ rc_roomlist_got_list(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
 		
 		purple_roomlist_room_add_field(roomlist, room, id);
 		purple_roomlist_room_add_field(roomlist, room, name);
-		purple_roomlist_room_add_field(roomlist, room, *room_type == 'p' ? _("Private") : "");
+		purple_roomlist_room_add_field(roomlist, room, room_type && *room_type == 'p' ? _("Private") : "");
 		
 		purple_roomlist_room_add(roomlist, room);
 	}
@@ -1783,6 +1790,12 @@ rc_login(PurpleAccount *account)
 	ya->received_message_queue = g_queue_new();
 	
 	userparts = g_strsplit(username, (char[2]) {RC_SERVER_SPLIT_CHAR, '\0'}, 2);
+	
+	if (userparts[0] == NULL || userparts[1] == NULL) {
+		purple_connection_error(pc, PURPLE_CONNECTION_ERROR_AUTHENTICATION_FAILED, "No username/server supplied");
+		return;
+	}
+	
 	purple_connection_set_display_name(pc, userparts[0]);
 	ya->username = g_strdup(userparts[0]);
 	ya->server = g_strdup(userparts[1]);
