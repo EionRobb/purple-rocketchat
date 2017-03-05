@@ -293,6 +293,7 @@ typedef struct {
 
 
 //#include <mkdio.h>
+char *markdown_version;
 int mkd_line(char *, int, char **, int);
 
 #define MKD_NOLINKS	0x00000001	/* don't do link processing, block <a> tags  */
@@ -336,10 +337,47 @@ rc_markdown_to_html(const gchar *markdown)
 	static char *markdown_str = NULL;
 	int markdown_len;
 	int flags = MKD_NOPANTS | MKD_NODIVQUOTE | MKD_NODLIST;
+	static gboolean markdown_version_checked = FALSE;
+	static gboolean markdown_version_safe = FALSE;
+	
+	if (!markdown_version_checked) {
+		gchar **markdown_version_split = g_strsplit_set(	markdown_version, ". ", -1);
+		gchar *last_part;
+		guint i = 0;
+		
+		do {
+			last_part = markdown_version_split[i++];
+		} while (markdown_version_split[i] != NULL);
+		
+		if (!purple_strequal(last_part, "DEBUG")) {
+			markdown_version_safe = TRUE;
+		} else {
+			gint major, minor, micro;
+			major = atoi(markdown_version_split[0]);
+			if (major > 2) {
+				markdown_version_safe = TRUE;
+			} else if (major == 2) {
+				minor = atoi(markdown_version_split[1]);
+				if (minor > 2) {
+					markdown_version_safe = TRUE;
+				} else if (minor == 2) {
+					micro = atoi(markdown_version_split[2]);
+					if (micro > 2) {
+						markdown_version_safe = TRUE;
+					}
+				}
+			}
+		}
+		
+		g_strfreev(markdown_version_split);
+		markdown_version_checked = TRUE;
+	}
 	
 	if (markdown_str != NULL) {
 		// if libmarkdown is pre-2.2.2 and we're using amalloc, don't free()
-		free(markdown_str);
+		if (markdown_version_safe) {
+			free(markdown_str);
+		}
 	}
 	
 	markdown_len = mkd_line((char *)markdown, strlen(markdown), &markdown_str, flags);
