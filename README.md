@@ -35,7 +35,7 @@ make && sudo make install
 ## Windows Builds ##
 Windows nightly builds at https://eion.robbmob.com/librocketchat.dll - copy to Program Files\Pidgin\plugins
 
-You'll also need [libjson-glib-1.0.dll](https://eion.robbmob.com/libjson-glib-1.0.dll) in your Program Files\Pidgin directory (if you don't already have the Skype/Facebook/Steam/other plugin installed)
+You'll also need [libjson-glib-1.0.dll](https://eion.robbmob.com/libjson-glib-1.0.dll) in your Program Files\Pidgin directory (*not the plugins subdirectory*) if you don't already have the Skype/Facebook/Steam/other plugin installed
 
 ## How to Use ##
 * Install the plugin (see above)
