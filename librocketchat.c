@@ -1205,7 +1205,13 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message_obj, JsonObje
 				
 				if (json_object_has_member(message_obj, "bot") && json_object_has_member(message_obj, "alias")) {
 					const gchar *alias = json_object_get_string_member(message_obj, "alias");
-					purple_chat_user_set_alias(cb, alias);
+					if (cb != NULL) {
+						purple_chat_user_set_alias(cb, alias);
+					} else {
+						gchar *temp_message = g_strdup_printf("%s: %s", alias, message);
+						g_free(message);
+						message = temp_message;
+					}
 				}
 				
 				// Group chat message
@@ -1215,7 +1221,7 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message_obj, JsonObje
 					rc_mark_room_messages_read(ya, rid);
 				}
 				
-				if (json_object_has_member(message_obj, "bot") && json_object_has_member(message_obj, "alias")) {
+				if (cb && json_object_has_member(message_obj, "bot") && json_object_has_member(message_obj, "alias")) {
 					purple_chat_user_set_alias(cb, NULL);
 				}
 				
