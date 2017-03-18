@@ -293,7 +293,7 @@ typedef struct {
 
 
 //#include <mkdio.h>
-char *markdown_version;
+extern char markdown_version[];
 int mkd_line(char *, int, char **, int);
 
 #define MKD_NOLINKS	0x00000001	/* don't do link processing, block <a> tags  */
