@@ -2485,9 +2485,17 @@ rc_got_users_of_room(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
 		GList *users = NULL, *flags = NULL;
 	
 		for (i = len - 1; i >= 0; i--) {
-			const gchar *record = json_array_get_string_element(records, i);
-			if (record != NULL) {
-				users = g_list_prepend(users, g_strdup(record));
+			JsonNode *record_element = json_array_get_element(records, i);
+			const gchar *username = NULL;
+			
+			if (JSON_NODE_HOLDS_OBJECT(record_element)) {
+				JsonObject *record = json_node_get_object(record_element);
+				username = json_object_get_string_member(record, "username");
+			} else {
+				username = json_node_get_string(record_element);
+			}
+			if (username != NULL) {
+				users = g_list_prepend(users, g_strdup(username));
 				flags = g_list_prepend(flags, GINT_TO_POINTER(PURPLE_CHAT_USER_NONE));
 			}
 		}
