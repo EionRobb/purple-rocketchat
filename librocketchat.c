@@ -2989,6 +2989,12 @@ rc_created_direct_message(RocketChatAccount *ya, JsonNode *node, gpointer user_d
 	const gchar *room_id = json_object_get_string_member(result, "rid");
 	PurpleBuddy *buddy = user_data;
 	
+	if (room_id == NULL) {
+		// buddy doesn't exist?
+		purple_debug_error("rocketchat", "Could not create DM for %s\n", purple_buddy_get_name(buddy));
+		return;
+	}
+	
 	if (buddy != NULL) {
 		const gchar *who = purple_buddy_get_name(buddy);
 		
