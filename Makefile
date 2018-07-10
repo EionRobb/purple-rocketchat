@@ -6,7 +6,6 @@ WIN32_DEV_TOP ?= $(PIDGIN_TREE_TOP)/../win32-dev
 
 WIN32_CC ?= $(WIN32_DEV_TOP)/mingw-4.7.2/bin/gcc
 
-PROTOC_C ?= protoc-c
 PKG_CONFIG ?= pkg-config
 
 REVISION_ID = $(shell hg id -i)
@@ -22,9 +21,14 @@ LDFLAGS ?= -Wl,-z,relro
 
 # Do some nasty OS and purple version detection
 ifeq ($(OS),Windows_NT)
+  #only defined on 64-bit windows
+  PROGFILES32 = ${ProgramFiles(x86)}
+  ifndef PROGFILES32
+    PROGFILES32 = $(PROGRAMFILES)
+  endif
   ROCKETCHAT_TARGET = librocketchat.dll
-  ROCKETCHAT_DEST = "$(PROGRAMFILES)/Pidgin/plugins"
-  ROCKETCHAT_ICONS_DEST = "$(PROGRAMFILES)/Pidgin/pixmaps/pidgin/protocols"
+  ROCKETCHAT_DEST = "$(PROGFILES32)/Pidgin/plugins"
+  ROCKETCHAT_ICONS_DEST = "$(PROGFILES32)/Pidgin/pixmaps/pidgin/protocols"
 else
 
   UNAME_S := $(shell uname -s)
