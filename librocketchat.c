@@ -282,7 +282,7 @@ typedef struct {
 	GSList *pending_writes;
 } RocketChatAccount;
 
-typedef void (*RocketChatProxyCallbackFunc)(RocketChatAccount *ya, JsonNode *node, gpointer user_data);
+typedef void (*RocketChatProxyCallbackFunc)(RocketChatAccount *ya, JsonNode *node, gpointer user_data, JsonObject *error);
 
 typedef struct {
 	RocketChatAccount *ya;
@@ -721,7 +721,7 @@ gpointer user_data, const gchar *url_text, gsize len, const gchar *error_message
 			json_object_set_int_member(dummy_object, "len", body_len);
 			g_dataset_set_data(dummy_node, "raw_body", (gpointer) body);
 			
-			conn->callback(conn->ya, dummy_node, conn->user_data);
+			conn->callback(conn->ya, dummy_node, conn->user_data, NULL);
 			
 			g_dataset_destroy(dummy_node);
 			json_node_free(dummy_node);
@@ -732,7 +732,7 @@ gpointer user_data, const gchar *url_text, gsize len, const gchar *error_message
 		
 		purple_debug_misc("rocketchat", "Got response: %s\n", body);
 		if (conn->callback) {
-			conn->callback(conn->ya, root, conn->user_data);
+			conn->callback(conn->ya, root, conn->user_data, NULL);
 		}
 	}
 	
@@ -838,21 +838,86 @@ static void rc_join_room(RocketChatAccount *ya, const gchar *room_id);
 static void rc_socket_write_json(RocketChatAccount *ya, JsonObject *data);
 static GHashTable *rc_chat_info_defaults(PurpleConnection *pc, const char *chatname);
 static void rc_mark_room_messages_read(RocketChatAccount *ya, const gchar *room_id);
-static void rc_account_connected(RocketChatAccount *ya, JsonNode *node, gpointer user_data);
+static void rc_account_connected(RocketChatAccount *ya, JsonNode *node, gpointer user_data, JsonObject *error);
+static void rc_login_response(RocketChatAccount *ya, JsonNode *node, gpointer user_data, JsonObject *error);
 
 static void
-rc_login_response(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
+rc_set_two_factor_auth_code_cb(gpointer data, const gchar *twofactorcode)
+{
+	RocketChatAccount *ya = data;
+
+	if (twofactorcode && *twofactorcode) {
+		//re-login, slightly different format to regular login
+		
+		JsonArray *params = json_array_new();
+		JsonObject *param = json_object_new();
+		JsonObject *totp = json_object_new();
+		JsonObject *login = json_object_new();
+		JsonObject *user = json_object_new();
+		JsonObject *password = json_object_new();
+		JsonObject *response = json_object_new();
+		gchar *digest;
+		
+		// Start a brand new login
+		if (strchr(ya->username, '@')) {
+			json_object_set_string_member(user, "email", ya->username);
+		} else {
+			json_object_set_string_member(user, "username", ya->username);
+		}
+		digest = g_compute_checksum_for_string(G_CHECKSUM_SHA256, purple_connection_get_password(ya->pc), -1);
+		json_object_set_string_member(password, "digest", digest);
+		json_object_set_string_member(password, "algorithm", "sha-256");
+		g_free(digest);
+		
+		json_object_set_object_member(login, "user", user);
+		json_object_set_object_member(login, "password", password);
+		
+		json_object_set_object_member(totp, "login", login);
+		json_object_set_string_member(totp, "code", twofactorcode);
+		
+		json_object_set_object_member(param, "totp", totp);
+		json_array_add_object_element(params, param);
+		
+		json_object_set_string_member(response, "msg", "method");
+		json_object_set_string_member(response, "method", "login");
+		json_object_set_array_member(response, "params", params);
+		json_object_set_string_member(response, "id", rc_get_next_id_str_callback(ya, rc_login_response, NULL));
+		
+		rc_socket_write_json(ya, response);
+		
+	} else {
+		purple_connection_error_reason(ya->pc, PURPLE_CONNECTION_ERROR_AUTHENTICATION_FAILED,
+		"Could not authenticate two-factor code.");
+	}
+}
+
+static void
+rc_login_response(RocketChatAccount *ya, JsonNode *node, gpointer user_data, JsonObject *error)
 {
 	JsonObject *response;
 
 	if (node == NULL) {
+		const gchar *error_msg = json_object_get_string_member(error, "error");
+		
+		if (purple_strequal(error_msg, "totp-required")) {
+			// needs a 2fa code
+			purple_request_input(ya->pc, NULL, _("Two-factor authentication"),
+						_("Open your authentication app and enter the code. You can also use one of your backup codes."), NULL,
+						FALSE, FALSE, "Two-Factor Auth Code", _("Verify"),
+						G_CALLBACK(rc_set_two_factor_auth_code_cb), _("Cancel"),
+						G_CALLBACK(rc_set_two_factor_auth_code_cb), ya->account,
+						NULL, NULL, ya);
+			return;
+		}
+		
+		purple_debug_error("rocketchat", "Error during login: %s\n", error_msg);
 		purple_connection_error(ya->pc, PURPLE_CONNECTION_ERROR_AUTHENTICATION_FAILED, "Bad username/password");
 		return;
 	}
 	
 	if (ya->session_token != NULL && ya->self_user != NULL) {
 		// Resubscribe if we're reestablishing a session
-		rc_account_connected(ya, NULL, NULL);
+		rc_account_connected(ya, NULL, NULL, NULL);
 	}
 	
 	response = json_node_get_object(node);
@@ -864,7 +929,7 @@ rc_login_response(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
 }
 
 static void
-rc_got_open_rooms(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
+rc_got_open_rooms(RocketChatAccount *ya, JsonNode *node, gpointer user_data, JsonObject *error)
 {
 	//a["{\"msg\":\"result\",\"id\":\"9\",\"result\":{\"update\":[{\"_id\":\"GENERAL\",\"name\":\"general\",\"t\":\"c\",\"topic\":\"Community support in [#support](https://demo.rocket.chat/channel/support).  Developers in [#dev](https://demo.rocket.chat/channel/dev)\",\"muted\":[\"daly\",\"kkloggg\",\"staci.holmes.segarra\"],\"jitsiTimeout\":{\"$date\":1476781304981},\"default\":true},{\"_id\":\"YdpayxcMhWFGKRZb3hZKg86uJavE6jYLya\",\"t\":\"d\"},{\"_id\":\"hZKg86uJavE6jYLyavxiySsLD8gLjgnmnN\",\"t\":\"d\"},{\"_id\":\"2urrp3DyDkLxoMAd3hZKg86uJavE6jYLya\",\"t\":\"d\"},{\"_id\":\"QFhAaDzea7cFK6ChB\",\"name\":\"test-private\",\"t\":\"p\",\"u\":{\"_id\":null,\"username\":null},\"ro\":false},{\"_id\":\"b98BYkRbiD5swDfyY\",\"name\":\"dev\",\"t\":\"c\",\"u\":{\"_id\":\"yhHvK7uhhXh9DqKWH\",\"username\":\"diego.sampaio\"},\"topic\":\"Community and core devs hangout.  Learn code in [#learn](https://demo.rocket.chat/channel/learn).  Get support in [#support](https://demo.rocket.chat/channel/support)\",\"muted\":[\"geektest123\"],\"jitsiTimeout\":{\"$date\":1465876457842}},{\"_id\":\"JoxbibGnXizRb4ef4hZKg86uJavE6jYLya\",\"t\":\"d\"}],\"remove\":[{\"_id\":\"8cXLWPathApTRXHZZ\",\"_deletedAt\":{\"$date\":1477179315230}}]}}"]
 	if (node!=NULL) {
@@ -896,7 +961,7 @@ rc_got_open_rooms(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
 }
 
 static void
-rc_account_connected(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
+rc_account_connected(RocketChatAccount *ya, JsonNode *node, gpointer user_data, JsonObject *error)
 {
 	// Subscribe to user presences
 	//["{\"msg\":\"sub\",\"id\":\"WMzRMsMY58EKeBcBE\",\"name\":\"activeUsers\",\"params\":[]}"]
@@ -1513,12 +1578,13 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 		
 	} else if (purple_strequal(msg, "result")) {
 		JsonNode *result = json_object_get_member(obj, "result");
+		JsonObject *error = json_object_get_object_member(obj, "error");
 		const gchar *callback_id = json_object_get_string_member(obj, "id");
 		RocketChatProxyConnection *proxy = g_hash_table_lookup(ya->result_callbacks, callback_id);
 		
 		if (proxy != NULL) {
 			if (proxy->callback != NULL) {
-				proxy->callback(ya, result, proxy->user_data);
+				proxy->callback(ya, result, proxy->user_data, error);
 			}
 			g_hash_table_remove(ya->result_callbacks, callback_id);
 		}
@@ -1582,7 +1648,7 @@ void rc_handle_add_new_user(RocketChatAccount *ya, JsonObject *obj) {
 			ya->self_user = g_strdup(username);
 
 			purple_connection_set_display_name(ya->pc, ya->self_user);
-			rc_account_connected(ya, NULL, NULL);
+			rc_account_connected(ya, NULL, NULL, NULL);
 		} else if (purple_account_get_bool(account, "auto-add-buddy", FALSE)) {
 			//other user not us
 			PurpleBuddy *buddy = purple_blist_find_buddy(account, username);
@@ -1599,7 +1665,7 @@ void rc_handle_add_new_user(RocketChatAccount *ya, JsonObject *obj) {
 }
 
 static void
-rc_roomlist_got_list(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
+rc_roomlist_got_list(RocketChatAccount *ya, JsonNode *node, gpointer user_data, JsonObject *error)
 {
 	//a["{\"msg\":\"result\",\"id\":\"13\",\"result\":{\"channels\":[{\"_id\":\"oJmjKQJyixALtty5g\",\"name\":\"commitee\"},{\"_id\":\"jtQDeqzzf2M8oe7Bq\",\"name\":\"enspiral\"},{\"_id\":\"GENERAL\",\"name\":\"general\"},{\"_id\":\"GzxgcmSRcCoSg3tmJ\",\"name\":\"meetupchch\"},{\"_id\":\"EqssvQgYZ9HEFsJ7g\",\"name\":\"technical\"}]}}"]
 	PurpleRoomlist *roomlist = user_data;
@@ -2420,7 +2486,7 @@ rc_get_chat_name(GHashTable *data)
 }
 
 static void 
-rc_got_users_of_room(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
+rc_got_users_of_room(RocketChatAccount *ya, JsonNode *node, gpointer user_data, JsonObject *error)
 {
 	JsonObject *result = json_node_get_object(node);
 	gchar *room_id = user_data;
@@ -2515,7 +2581,7 @@ rc_got_users_of_room(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
 }
 
 static void
-rc_got_history_of_room(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
+rc_got_history_of_room(RocketChatAccount *ya, JsonNode *node, gpointer user_data, JsonObject *error)
 {
 	JsonObject *result = json_node_get_object(node);
 	JsonArray *messages = json_object_get_array_member(result, "messages");
@@ -2697,7 +2763,7 @@ rc_join_room(RocketChatAccount *ya, const gchar *room_id)
 static void rc_join_chat(PurpleConnection *pc, GHashTable *chatdata);
 
 static void
-rc_got_chat_name_id(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
+rc_got_chat_name_id(RocketChatAccount *ya, JsonNode *node, gpointer user_data, JsonObject *error)
 {
 	GHashTable *chatdata = user_data;
 	//a["{\"msg\":\"result\",\"id\":\"7\",\"result\":\"b98BYkRbiD5swDfyY\"}"]
@@ -2983,15 +3049,16 @@ const gchar *message, PurpleMessageFlags flags)
 }
 
 static void
-rc_created_direct_message(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
+rc_created_direct_message(RocketChatAccount *ya, JsonNode *node, gpointer user_data, JsonObject *error)
 {
 	JsonObject *result = json_node_get_object(node);
 	const gchar *room_id = json_object_get_string_member(result, "rid");
 	PurpleBuddy *buddy = user_data;
 	
 	if (room_id == NULL) {
+		const gchar *error_msg = json_object_get_string_member(error, "message");
 		// buddy doesn't exist?
-		purple_debug_error("rocketchat", "Could not create DM for %s\n", purple_buddy_get_name(buddy));
+		purple_debug_error("rocketchat", "Could not create DM for %s because %s\n", purple_buddy_get_name(buddy), error_msg);
 		return;
 	}
 	
@@ -3008,7 +3075,7 @@ rc_created_direct_message(RocketChatAccount *ya, JsonNode *node, gpointer user_d
 }
 
 static void
-rc_created_direct_message_send(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
+rc_created_direct_message_send(RocketChatAccount *ya, JsonNode *node, gpointer user_data, JsonObject *error)
 {
 	PurpleMessage *msg = user_data;
 	JsonObject *result;
@@ -3018,6 +3085,9 @@ rc_created_direct_message_send(RocketChatAccount *ya, JsonNode *node, gpointer u
 	PurpleBuddy *buddy;
 	
 	if (node == NULL) {
+		const gchar *error_msg = json_object_get_string_member(error, "message");
+		
+		purple_debug_error("rocketchat", "Could not create conversation: %s\n", error_msg);
 		purple_conversation_present_error(who, ya->account, _("Could not create conversation"));
 		purple_message_destroy(msg);
 		return;
@@ -3153,7 +3223,7 @@ rc_chat_set_topic(PurpleConnection *pc, int id, const char *topic)
 }
 
 static void
-rc_got_avatar(RocketChatAccount *ya, JsonNode *node, gpointer user_data)
+rc_got_avatar(RocketChatAccount *ya, JsonNode *node, gpointer user_data, JsonObject *error)
 {
 	if (node != NULL) {
 		JsonObject *response = json_node_get_object(node);
