@@ -10,10 +10,17 @@ PKG_CONFIG ?= pkg-config
 
 REVISION_ID = $(shell hg id -i)
 REVISION_NUMBER = $(shell hg id -n)
-ifneq ($(REVISION_ID),)
-PLUGIN_VERSION ?= 0.9.$(shell date +%Y.%m.%d).git.r$(REVISION_NUMBER).$(REVISION_ID)
+DATE_FMT = %Y.%m.%d
+ifdef SOURCE_DATE_EPOCH
+    BUILD_DATE ?= $(shell date -u -d "@$(SOURCE_DATE_EPOCH)" "+$(DATE_FMT)"  2>/dev/null || date -u -r "$(SOURCE_DATE_EPOCH)" "+$(DATE_FMT)" 2>/dev/null || date -u "+$(DATE_FMT)")
 else
-PLUGIN_VERSION ?= 0.9.$(shell date +%Y.%m.%d)
+    BUILD_DATE ?= $(shell date "+$(DATE_FMT)")
+endif
+
+ifneq ($(REVISION_ID),)
+PLUGIN_VERSION ?= 0.9.$(BUILD_DATE).git.r$(REVISION_NUMBER).$(REVISION_ID)
+else
+PLUGIN_VERSION ?= 0.9.$(BUILD_DATE)
 endif
 
 CFLAGS	?= -O2 -g -pipe -Wall -DROCKETCHAT_PLUGIN_VERSION='"$(PLUGIN_VERSION)"'
