@@ -1889,6 +1889,16 @@ rc_login(PurpleAccount *account)
 		ya->last_load_last_message_timestamp = (ya->last_load_last_message_timestamp << 32) | ((guint64) purple_account_get_int(account, "last_message_timestamp_low", 0) & 0xFFFFFFFF);
 	}
 	
+	ya->session_token = g_strdup(purple_account_get_string(account, "personal_access_token", NULL));
+	if (ya->session_token && *ya->session_token) {
+		ya->self_user = g_strdup(purple_account_get_string(account, "personal_access_token_user_id", NULL));
+		
+		if (!ya->self_user || !*ya->self_user) {
+			purple_connection_error(pc, PURPLE_CONNECTION_ERROR_AUTHENTICATION_FAILED, "Both the 'Personal Access Token' and 'User ID' fields should be filled out but the 'User ID' is missing.");
+			return;
+		}
+	}
+	
 	ya->one_to_ones = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
 	ya->one_to_ones_rev = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
 	ya->group_chats = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
@@ -1903,6 +1913,8 @@ rc_login(PurpleAccount *account)
 	
 	if (userparts[0] == NULL || userparts[1] == NULL) {
 		purple_connection_error(pc, PURPLE_CONNECTION_ERROR_AUTHENTICATION_FAILED, "No username/server supplied");
+		
+		g_strfreev(userparts);
 		return;
 	}
 	
@@ -3339,6 +3351,12 @@ rc_add_account_options(GList *account_options)
 	PurpleAccountOption *option;
 	
 	option = purple_account_option_bool_new(N_("Auto-add buddies to the buddy list"), "auto-add-buddy", FALSE);
+	account_options = g_list_append(account_options, option);
+	
+	option = purple_account_option_string_new(N_("Personal Access Token"), "personal_access_token", "");
+	account_options = g_list_append(account_options, option);
+	
+	option = purple_account_option_string_new(N_("Personal Access Token - User ID"), "personal_access_token_user_id", "");
 	account_options = g_list_append(account_options, option);
 	
 	return account_options;
