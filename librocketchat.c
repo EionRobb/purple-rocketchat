@@ -250,6 +250,7 @@ typedef struct {
 	gchar *session_token;
 	gchar *channel;
 	gchar *self_user;
+	gchar *self_user_id;
 	
 	gint64 last_message_timestamp;
 	gint64 last_load_last_message_timestamp;
@@ -1115,11 +1116,12 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message_obj, JsonObje
 	const gchar *rid = json_object_get_string_member(message_obj, "rid");
 	const gchar *t = json_object_get_string_member(message_obj, "t");
 	const gchar *username = json_object_get_string_member(u, "username");
+	const gchar *user_id = json_object_get_string_member(u, "_id");
 	const gchar *roomType = json_object_get_string_member(roomarg, "roomType");
 	const gchar *room_name = g_hash_table_lookup(ya->group_chats, rid);
 	gint64 sdate = json_object_get_int_member(ts, "$date");
 	gint64 timestamp = sdate / 1000;
-	PurpleMessageFlags msg_flags = (purple_strequal(username, ya->self_user) ? PURPLE_MESSAGE_SEND : PURPLE_MESSAGE_RECV);
+	PurpleMessageFlags msg_flags = (purple_strequal(username, ya->self_user) || purple_strequal(user_id, ya->self_user_id) ? PURPLE_MESSAGE_SEND : PURPLE_MESSAGE_RECV);
 	
 	if (purple_strequal(t, "uj")) {
 		PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_name, ya->account);
@@ -1643,7 +1645,7 @@ void rc_handle_add_new_user(RocketChatAccount *ya, JsonObject *obj) {
 		g_hash_table_replace(ya->usernames_to_ids, g_strdup(username), g_strdup(user_id));
 		g_hash_table_replace(ya->ids_to_usernames, g_strdup(user_id), g_strdup(username));
 
-		if (!ya->self_user) {
+		if (!ya->self_user || purple_strequal(user_id, ya->self_user_id)) {
 			// The first user added to the collection is us
 			ya->self_user = g_strdup(username);
 
@@ -1889,16 +1891,6 @@ rc_login(PurpleAccount *account)
 		ya->last_load_last_message_timestamp = (ya->last_load_last_message_timestamp << 32) | ((guint64) purple_account_get_int(account, "last_message_timestamp_low", 0) & 0xFFFFFFFF);
 	}
 	
-	ya->session_token = g_strdup(purple_account_get_string(account, "personal_access_token", NULL));
-	if (ya->session_token && *ya->session_token) {
-		ya->self_user = g_strdup(purple_account_get_string(account, "personal_access_token_user_id", NULL));
-		
-		if (!ya->self_user || !*ya->self_user) {
-			purple_connection_error(pc, PURPLE_CONNECTION_ERROR_AUTHENTICATION_FAILED, "Both the 'Personal Access Token' and 'User ID' fields should be filled out but the 'User ID' is missing.");
-			return;
-		}
-	}
-	
 	ya->one_to_ones = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
 	ya->one_to_ones_rev = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
 	ya->group_chats = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
@@ -1922,6 +1914,24 @@ rc_login(PurpleAccount *account)
 	ya->username = g_strdup(userparts[0]);
 	ya->server = g_strdup(userparts[1]);
 	g_strfreev(userparts);
+	
+	
+	ya->session_token = g_strdup(purple_account_get_string(account, "personal_access_token", NULL));
+	if (ya->session_token && *ya->session_token) {
+		const gchar *user_id = purple_account_get_string(account, "personal_access_token_user_id", NULL);
+		
+		if (!user_id || !*user_id) {
+			purple_connection_error(pc, PURPLE_CONNECTION_ERROR_AUTHENTICATION_FAILED, "Both the 'Personal Access Token' and 'User ID' fields should be filled out but the 'User ID' is missing.");
+			return;
+		}
+		
+		ya->self_user_id = g_strdup(user_id);
+		
+		//Is this valid? - No, usernames on the serverside can be different to usernames on the client side
+		//g_hash_table_replace(ya->usernames_to_ids, g_strdup(ya->username), g_strdup(user_id));
+		//g_hash_table_replace(ya->ids_to_usernames, g_strdup(user_id), g_strdup(ya->username));
+
+	}
 	
 	purple_connection_set_state(pc, PURPLE_CONNECTION_CONNECTING);
 
@@ -1993,6 +2003,7 @@ rc_close(PurpleConnection *pc)
 	g_free(ya->session_token); ya->session_token = NULL;
 	g_free(ya->channel); ya->channel = NULL;
 	g_free(ya->self_user); ya->self_user = NULL;
+	g_free(ya->self_user_id); ya->self_user_id = NULL;
 	g_free(ya);
 }
 
