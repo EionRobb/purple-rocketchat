@@ -47,3 +47,6 @@ You'll also need [libjson-glib-1.0.dll](https://eion.robbmob.com/libjson-glib-1.
 + ![rocket chat roomlist 2.png](https://bitbucket.org/repo/gEprjk/images/2591558922-rocket%20chat%20roomlist%202.png)
 * Add the chat to your buddy list
 + ![rocket chat add room.png](https://bitbucket.org/repo/gEprjk/images/853635018-rocket%20chat%20add%20room.png)
+
+## Like this plugin? ##
+Say "Thanks" by [sending $1](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=PZMBF2QVF69GA)
