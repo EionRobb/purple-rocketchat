@@ -916,7 +916,7 @@ rc_login_response(RocketChatAccount *ya, JsonNode *node, gpointer user_data, Jso
 		return;
 	}
 	
-	if (ya->session_token != NULL && ya->self_user != NULL) {
+	if (ya->session_token && *ya->session_token && ya->self_user != NULL) {
 		// Resubscribe if we're reestablishing a session
 		rc_account_connected(ya, NULL, NULL, NULL);
 	}
@@ -1550,7 +1550,7 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 		JsonObject *password = json_object_new();
 		gchar *digest;
 		
-		if (ya->session_token) {
+		if (ya->session_token && *ya->session_token) {
 			// Continue an existing session
 			json_object_set_string_member(param, "resume", ya->session_token);
 		} else {
@@ -1931,6 +1931,9 @@ rc_login(PurpleAccount *account)
 		//g_hash_table_replace(ya->usernames_to_ids, g_strdup(ya->username), g_strdup(user_id));
 		//g_hash_table_replace(ya->ids_to_usernames, g_strdup(user_id), g_strdup(ya->username));
 
+	} else {
+		g_free(ya->session_token);
+		ya->session_token = NULL;
 	}
 	
 	purple_connection_set_state(pc, PURPLE_CONNECTION_CONNECTING);
