@@ -257,6 +257,7 @@ typedef struct {
 	
 	gchar *username;
 	gchar *server;
+	gchar *path;
 	
 	PurpleSslConnection *websocket;
 	gboolean websocket_header_received;
@@ -1248,7 +1249,7 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message_obj, JsonObje
 					const gchar *title_link = json_object_get_string_member(attachment, "title_link");
 					
 					if (title != NULL && title_link != NULL) {
-						gchar *temp_message = g_strdup_printf("%s <a href=\"https://%s%s\">%s</a>", (message ? message : ""), ya->server, title_link, title);
+						gchar *temp_message = g_strdup_printf("%s <a href=\"https://%s%s%s\">%s</a>", (message ? message : ""), ya->server, ya->path, title_link, title);
 						g_free(message);
 						message = temp_message;
 					}
@@ -1913,6 +1914,7 @@ rc_login(PurpleAccount *account)
 	purple_connection_set_display_name(pc, userparts[0]);
 	ya->username = g_strdup(userparts[0]);
 	ya->server = g_strdup(userparts[1]);
+	ya->path = g_strdup(purple_account_get_string(account, "server_path", NULL));
 	g_strfreev(userparts);
 	
 	
@@ -1942,7 +1944,7 @@ rc_login(PurpleAccount *account)
 	rc_build_groups_from_blist(ya);
 	
 	//TODO do something with this callback to make sure it's actually a rocket.chat server
-	url = g_strconcat("https://", ya->server, "/api/info", NULL);
+	url = g_strconcat("https://", ya->server, ya->path, "/api/info", NULL);
 	rc_fetch_url(ya, url, NULL, NULL, NULL);
 	g_free(url);
 	
@@ -2002,6 +2004,7 @@ rc_close(PurpleConnection *pc)
 	g_hash_table_destroy(ya->cookie_table); ya->cookie_table = NULL;
 	g_free(ya->username); ya->username = NULL;
 	g_free(ya->server); ya->server = NULL;
+	g_free(ya->path); ya->path = NULL;
 	g_free(ya->frame); ya->frame = NULL;
 	g_free(ya->session_token); ya->session_token = NULL;
 	g_free(ya->channel); ya->channel = NULL;
@@ -2326,7 +2329,7 @@ rc_socket_connected(gpointer userdata, PurpleSslConnection *conn, PurpleInputCon
 	
 	purple_ssl_input_add(ya->websocket, rc_socket_got_data, ya);
 	
-	g_string_append_printf(url, "/sockjs/%d/pidgin%d/websocket", g_random_int_range(100, 999), g_random_int_range(1, 100));
+	g_string_append_printf(url, "%s/sockjs/%d/pidgin%d/websocket", ya->path, g_random_int_range(100, 999), g_random_int_range(1, 100));
 	cookies = rc_cookies_to_string(ya);
 	
 	websocket_header = g_strdup_printf("GET %s HTTP/1.1\r\n"
@@ -3312,7 +3315,7 @@ rc_add_buddy(PurpleConnection *pc, PurpleBuddy *buddy, PurpleGroup *group
 	
 	
 	//avatar at https://{server}/avatar/{username}.jpg?_dc=0
-	avatar_url = g_strdup_printf("https://%s/avatar/%s.jpg?_dc=0", ya->server, purple_url_encode(buddy_name));
+	avatar_url = g_strdup_printf("https://%s%s/avatar/%s.jpg?_dc=0", ya->server, ya->path, purple_url_encode(buddy_name));
 	rc_fetch_url(ya, avatar_url, NULL, rc_got_avatar, buddy);
 	g_free(avatar_url);
 	
@@ -3373,6 +3376,8 @@ rc_add_account_options(GList *account_options)
 	option = purple_account_option_string_new(N_("Personal Access Token - User ID"), "personal_access_token_user_id", "");
 	account_options = g_list_append(account_options, option);
 	
+	option = purple_account_option_string_new(N_("Server Path"), "server_path", "/");
+	account_options = g_list_append(account_options, option);
 	return account_options;
 }
 
