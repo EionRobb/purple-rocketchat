@@ -1914,7 +1914,7 @@ rc_login(PurpleAccount *account)
 	purple_connection_set_display_name(pc, userparts[0]);
 	ya->username = g_strdup(userparts[0]);
 	ya->server = g_strdup(userparts[1]);
-	ya->path = g_strdup(purple_account_get_string(account, "server_path", NULL));
+	ya->path = g_strdup(purple_account_get_string(account, "server_path", ""));
 	g_strfreev(userparts);
 	
 	
@@ -3376,7 +3376,7 @@ rc_add_account_options(GList *account_options)
 	option = purple_account_option_string_new(N_("Personal Access Token - User ID"), "personal_access_token_user_id", "");
 	account_options = g_list_append(account_options, option);
 	
-	option = purple_account_option_string_new(N_("Server Path"), "server_path", "/");
+	option = purple_account_option_string_new(N_("Server Path"), "server_path", "");
 	account_options = g_list_append(account_options, option);
 	return account_options;
 }
