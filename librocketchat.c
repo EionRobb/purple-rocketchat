@@ -931,6 +931,39 @@ rc_login_response(RocketChatAccount *ya, JsonNode *node, gpointer user_data, Jso
 }
 
 static void
+rc_got_available_channels(RocketChatAccount *ya, JsonNode *node, gpointer user_data, JsonObject *error)
+{
+	//a["{\"msg\":\"result\",\"id\":\"21\",\"result\":{\"results\":[{\"_id\":\"GENERAL\",\"ts\":{\"$date\":1452986191014},\"name\":\"general\",\"topic\":\"This is a place for discussing open stuff in general. \",\"usersCount\":133},{\"_id\":\"eDKdsqHvNS8daAuht\",\"name\":\"social\",\"ts\":{\"$date\":1481323183876},\"topic\":\"Mastodon is a go! https://mastodon.nzoss.nz\",\"usersCount\":88},{\"_id\":\"MrmrBzkct44AHR2mm\",\"name\":\"random\",\"ts\":{\"$date\":1494728486364},\"usersCount\":83},{\"_id\":\"RBon2Y8FvbM6ekSK4\",\"name\":\"cacophony\",\"ts\":{\"$date\":1504150149829},\"usersCount\":23},{\"_id\":\"EqssvQgYZ9HEFsJ7g\",\"name\":\"technical\",\"ts\":{\"$date\":1455571771183},\"usersCount\":15},{\"_id\":\"GzxgcmSRcCoSg3tmJ\",\"name\":\"meetupchch\",\"ts\":{\"$date\":1459925099523},\"usersCount\":10},{\"_id\":\"eeiXN389SQY9Zfxsr\",\"name\":\"education\",\"ts\":{\"$date\":1481674049811},\"usersCount\":10},{\"_id\":\"DprfYgDrFE3smzgLh\",\"name\":\"constitution\",\"ts\":{\"$date\":1530834056707},\"topic\":\"NZOSS Constitution Reboot\",\"usersCount\":9},{\"_id\":\"4o3kKcoh6JXDvKm2a\",\"name\":\"openhardware\",\"ts\":{\"$date\":1480623613032},\"usersCount\":8},{\"_id\":\"rzBavTjFG4QyGhacE\",\"name\":\"python\",\"ts\":{\"$date\":1494728119751},\"archived\":true,\"usersCount\":8},{\"_id\":\"ALaF23Thjoff3JHSF\",\"name\":\"opengovt\",\"ts\":{\"$date\":1494728230237},\"usersCount\":6},{\"_id\":\"3AXn9yFRELQiuFezB\",\"name\":\"opengis\",\"ts\":{\"$date\":1494728257761},\"usersCount\":5},{\"_id\":\"C4CKsmoxK9dKKqDb3\",\"name\":\"wossat\",\"ts\":{\"$date\":1519946805422},\"usersCount\":5},{\"_id\":\"wdLQs8W84zug82beC\",\"name\":\"javascript\",\"ts\":{\"$date\":1494728110540},\"archived\":true,\"usersCount\":4},{\"_id\":\"s84SH5mL5844qbdrh\",\"name\":\"opendata\",\"ts\":{\"$date\":1494728221034},\"usersCount\":4},{\"_id\":\"PJiokbJ7mymoiu6we\",\"name\":\"openbusiness\",\"ts\":{\"$date\":1494728465740},\"usersCount\":4},{\"_id\":\"EhrKSwyuR4ZjD2xx3\",\"name\":\"jibberjabber\",\"ts\":{\"$date\":1505082070434},\"usersCount\":4},{\"_id\":\"Fu3uA8cMFvaBi67ji\",\"name\":\"infosec\",\"ts\":{\"$date\":1519595381043},\"usersCount\":4},{\"_id\":\"FbbsdW8kdKkF2gTYz\",\"name\":\"r\",\"ts\":{\"$date\":1494728249585},\"usersCount\":3},{\"_id\":\"HWrmJN4CD2sPH42NM\",\"name\":\"meetupakl\",\"ts\":{\"$date\":1494728288813},\"usersCount\":3},{\"_id\":\"ENvJ2XWgorCMrNvxs\",\"name\":\"openphilosophy\",\"ts\":{\"$date\":1494728475274},\"usersCount\":3},{\"_id\":\"Ko5jBjfdFDpY6m4TY\",\"name\":\"support\",\"ts\":{\"$date\":1501634583459},\"usersCount\":3},{\"_id\":\"WuPdbAKoLrxL26efT\",\"name\":\"fab.city\",\"ts\":{\"$date\":1517261907226},\"usersCount\":3}],\"total\":30}}"]
+	if (node != NULL) {
+		JsonObject *result = json_node_get_object(node);
+		JsonArray *results = json_object_get_array_member(result, "results");
+		gint i, len = json_array_get_length(results);
+		
+		for (i = 0; i < len; i++) {
+			JsonObject *room_info = json_array_get_object_element(results, i);
+			
+			const gchar *room_id = json_object_get_string_member(room_info, "_id");
+			const gchar *topic = json_object_get_string_member(room_info, "topic");
+			const gchar *room_name = json_object_get_string_member(room_info, "name");
+			PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_name, ya->account);
+			
+			if (chatconv == NULL) {
+				chatconv = purple_conversations_find_chat_with_account(room_id, ya->account);
+			}
+			
+			if (chatconv != NULL && topic != NULL) {
+				gchar *html_topic = rc_markdown_to_html(topic);
+				purple_chat_conversation_set_topic(chatconv, NULL, html_topic);
+				g_free(html_topic);
+			}
+				
+			g_hash_table_replace(ya->group_chats, g_strdup(room_id), g_strdup(room_name));
+			g_hash_table_replace(ya->group_chats_rev, g_strdup(room_name), g_strdup(room_id));
+		}
+	}
+}
+
+static void
 rc_got_open_rooms(RocketChatAccount *ya, JsonNode *node, gpointer user_data, JsonObject *error)
 {
 	//a["{\"msg\":\"result\",\"id\":\"9\",\"result\":{\"update\":[{\"_id\":\"GENERAL\",\"name\":\"general\",\"t\":\"c\",\"topic\":\"Community support in [#support](https://demo.rocket.chat/channel/support).  Developers in [#dev](https://demo.rocket.chat/channel/dev)\",\"muted\":[\"daly\",\"kkloggg\",\"staci.holmes.segarra\"],\"jitsiTimeout\":{\"$date\":1476781304981},\"default\":true},{\"_id\":\"YdpayxcMhWFGKRZb3hZKg86uJavE6jYLya\",\"t\":\"d\"},{\"_id\":\"hZKg86uJavE6jYLyavxiySsLD8gLjgnmnN\",\"t\":\"d\"},{\"_id\":\"2urrp3DyDkLxoMAd3hZKg86uJavE6jYLya\",\"t\":\"d\"},{\"_id\":\"QFhAaDzea7cFK6ChB\",\"name\":\"test-private\",\"t\":\"p\",\"u\":{\"_id\":null,\"username\":null},\"ro\":false},{\"_id\":\"b98BYkRbiD5swDfyY\",\"name\":\"dev\",\"t\":\"c\",\"u\":{\"_id\":\"yhHvK7uhhXh9DqKWH\",\"username\":\"diego.sampaio\"},\"topic\":\"Community and core devs hangout.  Learn code in [#learn](https://demo.rocket.chat/channel/learn).  Get support in [#support](https://demo.rocket.chat/channel/support)\",\"muted\":[\"geektest123\"],\"jitsiTimeout\":{\"$date\":1465876457842}},{\"_id\":\"JoxbibGnXizRb4ef4hZKg86uJavE6jYLya\",\"t\":\"d\"}],\"remove\":[{\"_id\":\"8cXLWPathApTRXHZZ\",\"_deletedAt\":{\"$date\":1477179315230}}]}}"]
@@ -946,9 +979,10 @@ rc_got_open_rooms(RocketChatAccount *ya, JsonNode *node, gpointer user_data, Jso
 			if (room_type && *room_type != 'd') {
 				const gchar *topic = json_object_get_string_member(room_info, "topic");
 				const gchar *room_name = json_object_get_string_member(room_info, "name");
+				const gchar *room_id = json_object_get_string_member(room_info, "_id");
 				PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_name, ya->account);
+				
 				if (chatconv == NULL) {
-					const gchar *room_id = json_object_get_string_member(room_info, "_id");
 					chatconv = purple_conversations_find_chat_with_account(room_id, ya->account);
 				}
 				
@@ -957,6 +991,9 @@ rc_got_open_rooms(RocketChatAccount *ya, JsonNode *node, gpointer user_data, Jso
 					purple_chat_conversation_set_topic(chatconv, NULL, html_topic);
 					g_free(html_topic);
 				}
+				
+				g_hash_table_replace(ya->group_chats, g_strdup(room_id), g_strdup(room_name));
+				g_hash_table_replace(ya->group_chats_rev, g_strdup(room_name), g_strdup(room_id));
 			}
 		}
 	}
@@ -1043,7 +1080,7 @@ rc_account_connected(RocketChatAccount *ya, JsonNode *node, gpointer user_data, 
 	
 	rc_socket_write_json(ya, data);
 	
-	//Fetch all known rooms
+	//Fetch all known rooms - deprecated since 0.72
 	//["{\"msg\":\"method\",\"method\":\"rooms/get\",\"params\":[{\"$date\":0}],\"id\":\"6\"}"]
 	data = json_object_new();
 	params = json_array_new();
@@ -1058,6 +1095,25 @@ rc_account_connected(RocketChatAccount *ya, JsonNode *node, gpointer user_data, 
 	json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_got_open_rooms, NULL));
 	
 	rc_socket_write_json(ya, data);
+	
+	//Fetch all known rooms
+	//["{\"msg\":\"method\",\"method\":\"browseChannels\",\"params\":[{\"text\":\"\",\"type\":\"channels\",\"sortBy\":\"usersCount\",\"sortDirection\":\"desc\",\"limit\":23,\"page\":0}],\"id\":\"21\"}"]
+	data = json_object_new();
+	params = json_array_new();
+	
+	date = json_object_new();
+	json_object_set_string_member(date, "text", "");
+	json_object_set_string_member(date, "type", "channels");
+	json_object_set_int_member(date, "limit", 500);
+	json_array_add_object_element(params, date);
+	
+	json_object_set_string_member(data, "msg", "method");
+	json_object_set_string_member(data, "method", "browseChannels");
+	json_object_set_array_member(data, "params", params);
+	json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_got_available_channels, NULL));
+	
+	rc_socket_write_json(ya, data);
+	
 	
 	purple_connection_set_state(ya->pc, PURPLE_CONNECTION_CONNECTED);
 }
