@@ -1104,7 +1104,10 @@ rc_account_connected(RocketChatAccount *ya, JsonNode *node, gpointer user_data, 
 	date = json_object_new();
 	json_object_set_string_member(date, "text", "");
 	json_object_set_string_member(date, "type", "channels");
+	json_object_set_string_member(date, "sortBy", "usersCount");
+	json_object_set_string_member(date, "sortDirection", "desc");
 	json_object_set_int_member(date, "limit", 500);
+	json_object_set_int_member(date, "page", 0);
 	json_array_add_object_element(params, date);
 	
 	json_object_set_string_member(data, "msg", "method");
