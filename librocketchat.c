@@ -980,9 +980,13 @@ rc_got_open_rooms(RocketChatAccount *ya, JsonNode *node, gpointer user_data, Jso
 				const gchar *topic = json_object_get_string_member(room_info, "topic");
 				const gchar *room_name = json_object_get_string_member(room_info, "name");
 				const gchar *room_id = json_object_get_string_member(room_info, "_id");
-				PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_name, ya->account);
+				PurpleChatConversation *chatconv = NULL;
 				
-				if (chatconv == NULL) {
+				if (room_name != NULL) {
+					purple_conversations_find_chat_with_account(room_name, ya->account);
+				}
+				
+				if (chatconv == NULL && room_id != NULL) {
 					chatconv = purple_conversations_find_chat_with_account(room_id, ya->account);
 				}
 				
@@ -992,8 +996,10 @@ rc_got_open_rooms(RocketChatAccount *ya, JsonNode *node, gpointer user_data, Jso
 					g_free(html_topic);
 				}
 				
-				g_hash_table_replace(ya->group_chats, g_strdup(room_id), g_strdup(room_name));
-				g_hash_table_replace(ya->group_chats_rev, g_strdup(room_name), g_strdup(room_id));
+				if (room_id != NULL && room_name != NULL) {
+					g_hash_table_replace(ya->group_chats, g_strdup(room_id), g_strdup(room_name));
+					g_hash_table_replace(ya->group_chats_rev, g_strdup(room_name), g_strdup(room_id));
+				}
 			}
 		}
 	}
