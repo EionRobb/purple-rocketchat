@@ -136,8 +136,11 @@ g_str_insensitive_hash(gconstpointer v)
 #define PurpleProtocolChatEntry  struct proto_chat_entry
 #define PurpleChatConversation             PurpleConvChat
 #define PurpleIMConversation               PurpleConvIm
-#define purple_conversations_find_chat_with_account(id, account) \
-		PURPLE_CONV_CHAT(purple_find_conversation_with_account(PURPLE_CONV_TYPE_CHAT, id, account))
+static inline PurpleConvChat * purple_conversations_find_chat_with_account(const char * name, const PurpleAccount * account)
+{
+	PurpleConversation * conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_CHAT, name, account);
+	return conv == NULL ? NULL : PURPLE_CONV_CHAT(conv);
+}
 #define purple_chat_conversation_has_left     purple_conv_chat_has_left
 #define PurpleConversationUpdateType          PurpleConvUpdateType
 #define PURPLE_CONVERSATION_UPDATE_UNSEEN     PURPLE_CONV_UPDATE_UNSEEN
@@ -2589,7 +2592,7 @@ rc_got_users_of_room(RocketChatAccount *ya, JsonNode *node, gpointer user_data, 
 	//Text	Sun Oct 23 00:08:23 NZDT 2016	Sun Oct 23 00:08:23 NZDT 2016	a["{\"msg\":\"result\",\"id\":\"15\",\"result\":{\"total\":84776,\"records\":[\"dominico\",\"sri.sri\",\"jacob.brush\",\"sergey-4\",\"joycebabu\",\"vongomben\",\"marina.belobrova\",\"maialen\",\"Guby\",\"kawa.mj\",\"abda\",\"allie.micka\",\"julien.dussart\",\"dkonn\",\"sasaki\",\"hiro-21\",\"cristian.florescu\",\"test1-17\",\"artkill\",\"rocket.cat\",\"gabba\",\"ouaise.abdel.razig\",\"linsk\",\"minh.tri\",\"shabu.ans\",\"daniel.summers\",\"elmor3no\",\"woody.lee\",\"nikoj.ne\",\"mael.lebastard\",\"Solange\",\"ramin\",\"singli\",\"sandra.brown\",\"touqeer.rao-CN\",\"shoukri\",\"lintt\",\"wim.stalmans\",\"john.bowles\",\"jeff.lindesmith\",\"div\",\"timotz\",\"maxime.chauvin\",\"natalia.chalovskaya\",\"mark.webb\",\"demik\",\"nshevate\",\"Team.GrossGerau\",\"eionrobb\",\"danish.soomro\",\"jeremy\",\"testing-33\",\"anwar.hakimi\",\"ldk\",\"stoccafisso\",\"mark.petersen\",\"yang-2\",\"yanis.abib\",\"alan.swan\",\"continuouslee\",\"aj2\",\"rebecca.thomson\",\"yuukan\",\"Snare\",\"kidatti\",\"jader\",\"gkarmas\",\"treym\",\"testDemoS\",\"hubot\",\"rivkah\",\"xenithorb\",\"greg-9\",\"kirby\",\"Olu1\",\"gayle.sabharwal\",\"dale.berger\",\"_\",\"systrace68\",\"amir-3\",\"matyee\",\"any2names\",\"craig.miller\",\"aviner.fishhof\",\"jacobroecker\",\"kevmonzon\",\"john.maharjan\",\"ian-42\",\"nazarov.aleksandr\",\"dave-18\",\"ddd-9\",\"ycq818\",\"ParineyPrinja\",\"mongoose\",\"tenks\",\"thangnc\",\"jamesbaek\",\"BaekWoosok\",\"onlyxool\",\"richardt.steil\",\"FrancescoL\",\"eugene.ferbruarie_Mousten\",\"bill-15\",\"daira\",\"stefana1\",\"jack.terrible\",\"joon626\",\"novy\",\"liyu0013\",\"munzy\",\"chuckbot\",\"hogg\",\"rolanx\",\"lokitoxic\",\"diogenes.alves.oliveira\",\"test.yeah.yeah\",\"Erikxxon\",\"heyrob\",\"mark.yardly\",\"romio.montas\",\"james.thomas\",\"thebelgarion\",\"art-1\",\"ys-1\",\"adry2k\",\"Petersch\",\"johannes57\"]}}"]
 	
 		
-	PurpleChatConversation *chatconv = purple_conversations_find_chat_with_account(room_name, ya->account);
+	PurpleChatConversation *chatconv = room_name == NULL ? NULL : purple_conversations_find_chat_with_account(room_name, ya->account);
 	
 	if (node == NULL) {
 		// Older server without support for getUsersOfRoom
