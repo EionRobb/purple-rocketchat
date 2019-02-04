@@ -1399,7 +1399,7 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message_obj, JsonObje
 
 void rc_handle_add_new_user(RocketChatAccount *ya, JsonObject *obj);
 
-PurpleGroup* rc_get_or_create_default_group();
+PurpleGroup* rc_get_or_create_default_group(PurpleAccount *account);
 
 static void
 rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
@@ -1410,7 +1410,6 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 	const gchar *msg = json_object_get_string_member(obj, "msg");
 	// gint64 createdTime = json_object_get_int_member(obj, "createdTime");
 	// gboolean old_event = !ya->sync_complete;
-    rc_get_or_create_default_group();
 
     if (purple_strequal(msg, "ping")) {
 		response = json_object_new();
@@ -1679,13 +1678,14 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 	}
 }
 
-PurpleGroup* rc_get_or_create_default_group() {
+PurpleGroup* rc_get_or_create_default_group(PurpleAccount *account) {
     PurpleGroup *rc_group = NULL;
 	
-	rc_group = purple_blist_find_group(_("Rocket.Chat"));
+	gchar const * const group_name = purple_account_get_string(account, "default-buddy-group", _("Rocket.Chat"));
+	rc_group = purple_blist_find_group(group_name);
 	if (!rc_group)
 	{
-		rc_group = purple_group_new(_("Rocket.Chat"));
+		rc_group = purple_group_new(group_name);
 		purple_blist_add_group(rc_group, NULL);
 	}
 	
@@ -1694,7 +1694,7 @@ PurpleGroup* rc_get_or_create_default_group() {
 
 void rc_handle_add_new_user(RocketChatAccount *ya, JsonObject *obj) {
 	PurpleAccount* account = ya->account;
-	PurpleGroup *defaultGroup = rc_get_or_create_default_group();
+	PurpleGroup *defaultGroup = rc_get_or_create_default_group(account);
 
     // a["{\"msg\":\"added\",\"collection\":\"users\",\"id\":\"hZKg86uJavE6jYLya\",\"fields\":{\"emails\":[{\"address\":\"eion@robbmob.com\",\"verified\":true}],\"username\":\"eionrobb\"}}"]
 
@@ -3438,6 +3438,9 @@ rc_add_account_options(GList *account_options)
 	option = purple_account_option_bool_new(N_("Auto-add buddies to the buddy list"), "auto-add-buddy", FALSE);
 	account_options = g_list_append(account_options, option);
 	
+	option = purple_account_option_string_new(N_("Default group"), "default-buddy-group", _("Rocket.Chat"));
+	account_options = g_list_append(account_options, option);
+
 	option = purple_account_option_string_new(N_("Personal Access Token"), "personal_access_token", "");
 	account_options = g_list_append(account_options, option);
 	
