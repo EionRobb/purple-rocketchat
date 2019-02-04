@@ -1410,7 +1410,6 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 	const gchar *msg = json_object_get_string_member(obj, "msg");
 	// gint64 createdTime = json_object_get_int_member(obj, "createdTime");
 	// gboolean old_event = !ya->sync_complete;
-    rc_get_or_create_default_group();
 
     if (purple_strequal(msg, "ping")) {
 		response = json_object_new();
