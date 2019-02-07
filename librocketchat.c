@@ -2429,6 +2429,11 @@ rc_socket_failed(PurpleSslConnection *conn, PurpleSslErrorType errortype, gpoint
 	ya->websocket = NULL;
 	ya->websocket_header_received = FALSE;
 	
+	if (errortype == PURPLE_SSL_CERTIFICATE_INVALID) {
+		purple_connection_ssl_error(ya->pc, errortype);
+		return;
+	}
+	
 	rc_restart_channel(ya);
 }
 
