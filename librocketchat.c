@@ -1604,9 +1604,9 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 			
 			if (username != NULL) {
 				purple_protocol_got_user_status(ya->account, username, "offline", NULL);
+				g_hash_table_remove(ya->usernames_to_ids, username);
 			}
 			
-			g_hash_table_remove(ya->usernames_to_ids, username);
 			g_hash_table_remove(ya->ids_to_usernames, user_id);
 		}
 		
