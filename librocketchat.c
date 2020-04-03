@@ -943,7 +943,11 @@ rc_login_response(RocketChatAccount *ya, JsonNode *node, gpointer user_data, Jso
 	if (json_object_has_member(response, "token")) {
 		g_free(ya->session_token);
 		ya->session_token = g_strdup(json_object_get_string_member(response, "token"));
-	}//a["{\"msg\":\"result\",\"id\":\"1\",\"result\":{\"id\":\"hZKg86uJavE6jYLya\",\"token\":\"OvG63dE9x79demZnrmBv4vnYYlGMMB-wRKVWFcTxQbv\",\"tokenExpires\":{\"$date\":1485062242977}}}"]
+	}
+	if (!ya->self_user_id && json_object_has_member(response, "id")) {
+		ya->self_user_id = g_strdup(json_object_get_string_member(response, "id"));
+	}
+	//a["{\"msg\":\"result\",\"id\":\"1\",\"result\":{\"id\":\"hZKg86uJavE6jYLya\",\"token\":\"OvG63dE9x79demZnrmBv4vnYYlGMMB-wRKVWFcTxQbv\",\"tokenExpires\":{\"$date\":1485062242977}}}"]
 	//a["{\"msg\":\"result\",\"id\":\"5\",\"error\":{\"error\":403,\"reason\":\"User has no password set\",\"message\":\"User has no password set [403]\",\"errorType\":\"Meteor.Error\"}}"]
 	
 	// Download all user presence (requires the session_token)
