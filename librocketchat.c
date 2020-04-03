@@ -146,7 +146,7 @@ static inline PurpleConvChat * purple_conversations_find_chat_with_account(const
 #define PURPLE_CONVERSATION_UPDATE_UNSEEN     PURPLE_CONV_UPDATE_UNSEEN
 #define PURPLE_IS_IM_CONVERSATION(conv)       (purple_conversation_get_type(conv) == PURPLE_CONV_TYPE_IM)
 #define PURPLE_IS_CHAT_CONVERSATION(conv)     (purple_conversation_get_type(conv) == PURPLE_CONV_TYPE_CHAT)
-#define PURPLE_CONVERSATION(chatorim)         (chatorim == NULL ? NULL : chatorim->conv)
+#define PURPLE_CONVERSATION(chatorim)         ((chatorim) == NULL ? NULL : (chatorim)->conv)
 #define PURPLE_IM_CONVERSATION(conv)          PURPLE_CONV_IM(conv)
 #define PURPLE_CHAT_CONVERSATION(conv)        PURPLE_CONV_CHAT(conv)
 #define purple_conversation_present_error     purple_conv_present_error
@@ -771,6 +771,12 @@ rc_fetch_url(RocketChatAccount *ya, const gchar *url, const gchar *postdata, Roc
 	purple_http_request_header_set(request, "Accept", "*/*");
 	purple_http_request_header_set(request, "User-Agent", ROCKETCHAT_USERAGENT);
 	purple_http_request_header_set(request, "Cookie", cookies);
+	if (ya->session_token && *ya->session_token) {
+		purple_http_request_header_set(request, "X-Auth-Token", ya->session_token);
+	}
+	if (ya->self_user_id && *ya->self_user_id) {
+		purple_http_request_header_set(request, "X-User-Id", ya->self_user_id);
+	}
 	
 	if (postdata) {
 		purple_debug_info("rocketchat", "With postdata %s\n", postdata);
@@ -805,6 +811,12 @@ rc_fetch_url(RocketChatAccount *ya, const gchar *url, const gchar *postdata, Roc
 	g_string_append_printf(headers, "Accept: */*\r\n");
 	g_string_append_printf(headers, "User-Agent: " ROCKETCHAT_USERAGENT "\r\n");
 	g_string_append_printf(headers, "Cookie: %s\r\n", cookies);
+	if (ya->session_token && *ya->session_token) {
+		g_string_append_printf(headers, "X-Auth-Token: %s\r\n", ya->session_token);
+	}
+	if (ya->self_user_id && *ya->self_user_id) {
+		g_string_append_printf(headers, "X-User-Id: %s\r\n", ya->self_user_id);
+	}
 
 	if (postdata) {
 		purple_debug_info("rocketchat", "With postdata %s\n", postdata);
@@ -845,6 +857,7 @@ static GHashTable *rc_chat_info_defaults(PurpleConnection *pc, const char *chatn
 static void rc_mark_room_messages_read(RocketChatAccount *ya, const gchar *room_id);
 static void rc_account_connected(RocketChatAccount *ya, JsonNode *node, gpointer user_data, JsonObject *error);
 static void rc_login_response(RocketChatAccount *ya, JsonNode *node, gpointer user_data, JsonObject *error);
+static void rc_got_users_presence(RocketChatAccount *ya, JsonNode *node, gpointer user_data, JsonObject *error);
 
 static void
 rc_set_two_factor_auth_code_cb(gpointer data, const gchar *twofactorcode)
@@ -928,9 +941,15 @@ rc_login_response(RocketChatAccount *ya, JsonNode *node, gpointer user_data, Jso
 	response = json_node_get_object(node);
 	
 	if (json_object_has_member(response, "token")) {
+		g_free(ya->session_token);
 		ya->session_token = g_strdup(json_object_get_string_member(response, "token"));
 	}//a["{\"msg\":\"result\",\"id\":\"1\",\"result\":{\"id\":\"hZKg86uJavE6jYLya\",\"token\":\"OvG63dE9x79demZnrmBv4vnYYlGMMB-wRKVWFcTxQbv\",\"tokenExpires\":{\"$date\":1485062242977}}}"]
 	//a["{\"msg\":\"result\",\"id\":\"5\",\"error\":{\"error\":403,\"reason\":\"User has no password set\",\"message\":\"User has no password set [403]\",\"errorType\":\"Meteor.Error\"}}"]
+	
+	// Download all user presence (requires the session_token)
+	gchar *url = g_strconcat("https://", ya->server, ya->path, "/api/v1/users.presence", NULL);
+	rc_fetch_url(ya, url, NULL, rc_got_users_presence, NULL);
+	g_free(url);
 }
 
 static void
@@ -1003,6 +1022,29 @@ rc_got_open_rooms(RocketChatAccount *ya, JsonNode *node, gpointer user_data, Jso
 					g_hash_table_replace(ya->group_chats, g_strdup(room_id), g_strdup(room_name));
 					g_hash_table_replace(ya->group_chats_rev, g_strdup(room_name), g_strdup(room_id));
 				}
+			}
+		}
+	}
+}
+
+static void
+rc_got_users_presence(RocketChatAccount *ya, JsonNode *node, gpointer user_data, JsonObject *error)
+{
+	if (node != NULL) {
+		JsonObject *response = json_node_get_object(node);
+		JsonArray *users = json_object_get_array_member(response, "users");
+		gint i, len = json_array_get_length(users);
+		
+		//latest are first
+		for (i = 0; i < len; i++) {
+			JsonObject *user = json_array_get_object_element(users, i);
+			const gchar *username = json_object_get_string_member(user, "username");
+			const gchar *status = json_object_get_string_member(user, "status");
+			const gchar *name = json_object_get_string_member(user, "name");
+			
+			purple_protocol_got_user_status(ya->account, username, status, NULL);
+			if (name != NULL) {
+				purple_serv_got_alias(ya->pc, username, name);
 			}
 		}
 	}
@@ -1472,7 +1514,6 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 				users = g_list_delete_link(users, users);
 			}
 			
-			g_list_free(users);
 			g_list_free(flags);
 		}
     } else if (purple_strequal(msg, "changed")) {
@@ -1544,6 +1585,7 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 							if (cb == NULL) {
 								// Getting notified about a buddy we dont know about yet
 								//TODO add buddy
+								g_strfreev(event_split);
 								return;
 							}
 							cbflags = purple_chat_user_get_flags(cb);
