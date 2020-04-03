@@ -1072,6 +1072,30 @@ rc_account_connected(RocketChatAccount *ya, JsonNode *node, gpointer user_data, 
 		}
 	}
 	
+	{
+		const gchar *subs[] = {"user-status", "updateAvatar", "roles-change", NULL};
+		guint i;
+		//Subscribe to avatar/status changes
+		for (i = 0; subs[i]; i++) {
+			data = json_object_new();
+			params = json_array_new();
+			
+			id = g_strdup_printf("%012XFFFF", g_random_int());
+			json_object_set_string_member(data, "id", id);
+			g_free(id);
+			
+			json_object_set_string_member(data, "msg", "sub");
+			json_object_set_string_member(data, "name", "stream-notify-logged");
+			
+			json_array_add_string_element(params, subs[i]);
+			json_array_add_boolean_element(params, FALSE);
+			
+			json_object_set_array_member(data, "params", params);
+			
+			rc_socket_write_json(ya, data);
+		}
+	}
+	
 	// Listen to all incoming direct messages?
 	data = json_object_new();
 	params = json_array_new();
@@ -1592,6 +1616,29 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 				}
 			}
 			g_strfreev(event_split);
+			
+		} else if (purple_strequal(collection, "stream-notify-logged")) {
+			JsonObject *fields = json_object_get_object_member(obj, "fields");
+			const gchar *eventName = json_object_get_string_member(fields, "eventName");
+			JsonArray *args = json_object_get_array_member(fields, "args");
+			
+			if (purple_strequal(eventName, "user-status")) {
+				//"args": [["uNqJeFuag2344i62k", "rocket.cat", 1]]
+				JsonArray *statusarr = json_array_get_array_element(args, 0);
+				const gchar *username = json_array_get_string_element(statusarr, 1);
+				guint64 status_id = json_array_get_int_element(statusarr, 2);
+				
+				const gchar *status = "offline";
+				if (status_id == 1) {
+					status = "online";
+				} else if (status_id == 2) {
+					status = "away";
+				} else if (status_id == 3) {
+					status = "busy";
+				}
+				
+				purple_protocol_got_user_status(ya->account, username, status, NULL);
+			}
 			
 		}
 	} else if (purple_strequal(msg, "removed")) {
