@@ -23,7 +23,10 @@ else
 PLUGIN_VERSION ?= 0.9.$(BUILD_DATE)
 endif
 
-CFLAGS	?= -O2 -g -pipe -Wall -DROCKETCHAT_PLUGIN_VERSION='"$(PLUGIN_VERSION)"'
+CFLAGS	?= -O2 -g -ggdb -pipe -Wall
+CPPFLAGS+= -DROCKETCHAT_PLUGIN_VERSION='"$(PLUGIN_VERSION)"'
+CFLAGS  += -fPIC
+CPPFLAGS+= -DPIC
 LDFLAGS ?= -Wl,-z,relro 
 
 # Do some nasty OS and purple version detection
@@ -90,10 +93,10 @@ PURPLE_C_FILES := librocketchat.c $(C_FILES)
 all: $(ROCKETCHAT_TARGET)
 
 librocketchat.so: $(PURPLE_C_FILES) $(PURPLE_COMPAT_FILES)
-	$(CC) -fPIC $(CFLAGS) -shared -o $@ $^ $(LDFLAGS) `$(PKG_CONFIG) purple glib-2.0 json-glib-1.0 --libs --cflags`  $(INCLUDES) -Ipurple2compat -g -ggdb -lmarkdown
+	$(CC) $(CPPFLAGS) $(CFLAGS) -shared -o $@ $^ $(LDFLAGS) `$(PKG_CONFIG) purple glib-2.0 json-glib-1.0 --libs --cflags`  $(INCLUDES) -Ipurple2compat -lmarkdown
 
 librocketchat3.so: $(PURPLE_C_FILES)
-	$(CC) -fPIC $(CFLAGS) -shared -o $@ $^ $(LDFLAGS) `$(PKG_CONFIG) purple-3 glib-2.0 json-glib-1.0 --libs --cflags` $(INCLUDES)  -g -ggdb -lmarkdown
+	$(CC) $(CPPFLAGS) $(CFLAGS) -shared -o $@ $^ $(LDFLAGS) `$(PKG_CONFIG) purple-3 glib-2.0 json-glib-1.0 --libs --cflags` $(INCLUDES) -lmarkdown
 
 librocketchat.dll: $(PURPLE_C_FILES) $(PURPLE_COMPAT_FILES)
 	$(WIN32_CC) -O0 -g -ggdb -shared -o $@ $^ $(WIN32_PIDGIN2_CFLAGS) $(WIN32_PIDGIN2_LDFLAGS) -Ipurple2compat
