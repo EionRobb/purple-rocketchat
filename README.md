@@ -1,4 +1,4 @@
-![Logo](https://bitbucket.org/EionRobb/purple-rocketchat/avatar)
+![Logo](https://github.com/EionRobb/purple-rocketchat/raw/master/rocketchat48.png)
 # Rocket.Chat Plugin for libpurple #
 
 Adds support for [Rocket.Chat](https://rocket.chat/) to libpurple clients, such as Pidgin.
@@ -28,7 +28,7 @@ Run the following commands from a terminal
 ```
 #!sh
 dnf install libpurple-devel.x86_64 libmarkdown-devel.x86_64 json-glib-devel.x86_64 glib2.x86_64
-hg clone https://bitbucket.org/EionRobb/purple-rocketchat/ && cd purple-rocketchat;
+git clone https://github.org/EionRobb/purple-rocketchat/ && cd purple-rocketchat;
 make && sudo make install
 ```
 
@@ -39,14 +39,10 @@ You'll also need [libjson-glib-1.0.dll](https://eion.robbmob.com/libjson-glib-1.
 
 ## How to Use ##
 * Install the plugin (see above)
-* Add your account (Accounts->Manage Accounts->Add):
-+ ![rocket chat add account.png](https://bitbucket.org/repo/gEprjk/images/3996485994-rocket%20chat%20add%20account.png)
-* Open the room list (Tools->Plugins):
-+ ![rocket chat roomlist.png](https://bitbucket.org/repo/gEprjk/images/4264884259-rocket%20chat%20roomlist.png)
-* Click the "Get List" button:
-+ ![rocket chat roomlist 2.png](https://bitbucket.org/repo/gEprjk/images/2591558922-rocket%20chat%20roomlist%202.png)
+* Add your account (Accounts->Manage Accounts->Add)
+* Open the room list (Tools->Room List...)
+* Click the "Get List" button
 * Add the chat to your buddy list
-+ ![rocket chat add room.png](https://bitbucket.org/repo/gEprjk/images/853635018-rocket%20chat%20add%20room.png)
 
 ## Like this plugin? ##
 Say "Thanks" by [sending $1](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=PZMBF2QVF69GA)
