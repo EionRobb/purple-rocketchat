@@ -1505,22 +1505,24 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 				chatconv = purple_conversations_find_chat_with_account(room_id, ya->account);
 			}
 		
-			for (i = len - 1; i >= 0; i--) {
-				const gchar *username = json_array_get_string_element(usernames, i);
-				if (username != NULL) {
-					users = g_list_prepend(users, g_strdup(username));
-					flags = g_list_prepend(flags, GINT_TO_POINTER(PURPLE_CHAT_USER_NONE));
+			if (chatconv != NULL) {
+				for (i = len - 1; i >= 0; i--) {
+					const gchar *username = json_array_get_string_element(usernames, i);
+					if (username != NULL) {
+						users = g_list_prepend(users, g_strdup(username));
+						flags = g_list_prepend(flags, GINT_TO_POINTER(PURPLE_CHAT_USER_NONE));
+					}
 				}
-			}
-		
-			purple_chat_conversation_add_users(chatconv, users, NULL, flags, FALSE);
 			
-			while (users != NULL) {
-				g_free(users->data);
-				users = g_list_delete_link(users, users);
+				purple_chat_conversation_add_users(chatconv, users, NULL, flags, FALSE);
+				
+				while (users != NULL) {
+					g_free(users->data);
+					users = g_list_delete_link(users, users);
+				}
+				
+				g_list_free(flags);
 			}
-			
-			g_list_free(flags);
 		}
     } else if (purple_strequal(msg, "changed")) {
 		const gchar *collection = json_object_get_string_member(obj, "collection");
@@ -1556,9 +1558,12 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 			
 			JsonObject *fields = json_object_get_object_member(obj, "fields");
 			JsonArray *args = json_object_get_array_member(fields, "args");
-			JsonObject *arg = json_array_get_object_element(args, 0);
-			if (arg == NULL) {
-				JsonArray *arg_array = json_array_get_array_element(args, 0);
+			JsonNode *arg_node = json_array_get_element(args, 0);
+			JsonObject *arg = NULL;
+			if (JSON_NODE_HOLDS_OBJECT(arg_node)) {
+				arg = json_node_get_object(arg_node);
+			} else {
+				JsonArray *arg_array = json_node_get_array(arg_node);
 				arg = json_array_get_object_element(arg_array, 0);
 			}
 			JsonObject *roomarg = json_array_get_object_element(args, 1);
