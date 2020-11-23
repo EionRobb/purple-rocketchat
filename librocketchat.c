@@ -1247,6 +1247,8 @@ rc_have_seen_message_id(RocketChatAccount *ya, const gchar *message_id)
 static gint64
 rc_process_room_message(RocketChatAccount *ya, JsonObject *message_obj, JsonObject *roomarg)
 {
+	g_return_val_if_fail(message_obj, 0);
+	
 	JsonObject *ts = json_object_get_object_member(message_obj, "ts");
 	JsonObject *u = json_object_get_object_member(message_obj, "u");
 	
@@ -1555,6 +1557,10 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 			JsonObject *fields = json_object_get_object_member(obj, "fields");
 			JsonArray *args = json_object_get_array_member(fields, "args");
 			JsonObject *arg = json_array_get_object_element(args, 0);
+			if (arg == NULL) {
+				JsonArray *arg_array = json_array_get_array_element(args, 0);
+				arg = json_array_get_object_element(arg_array, 0);
+			}
 			JsonObject *roomarg = json_array_get_object_element(args, 1);
 			const gchar *rid = json_object_get_string_member(arg, "rid");
 			gint64 last_message_timestamp;
