@@ -17,7 +17,7 @@ Run the following commands from a terminal
 
 ```shell
 #!sh
-sudo apt-get install libpurple-dev libjson-glib-dev libglib2.0-dev mercurial make libmarkdown2-dev;
+sudo apt-get install libpurple-dev libjson-glib-dev libglib2.0-dev git make libmarkdown2-dev;
 git clone https://github.com/EionRobb/purple-rocketchat && cd purple-rocketchat;
 make && sudo make install
 ```
