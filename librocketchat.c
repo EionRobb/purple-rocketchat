@@ -345,6 +345,10 @@ rc_markdown_to_html(const gchar *markdown)
 	static gboolean markdown_version_checked = FALSE;
 	static gboolean markdown_version_safe = FALSE;
 	
+	if (markdown == NULL) {
+		return NULL;
+	}
+	
 	if (!markdown_version_checked) {
 		gchar **markdown_version_split = g_strsplit_set(	markdown_version, ". ", -1);
 		gchar *last_part;
@@ -1366,7 +1370,7 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message_obj, JsonObje
 			chatconv = purple_conversations_find_chat_with_account(rid, ya->account);
 		}
 		
-		if (chatconv != NULL) {
+		if (chatconv != NULL && msg_text != NULL) {
 			gchar *html_topic = rc_markdown_to_html(msg_text);
 			purple_chat_conversation_set_topic(chatconv, NULL, html_topic);
 			g_free(html_topic);
