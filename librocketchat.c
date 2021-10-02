@@ -2120,7 +2120,7 @@ rc_login(PurpleAccount *account)
 	rc_build_groups_from_blist(ya);
 	
 	//TODO do something with this callback to make sure it's actually a rocket.chat server
-	url = g_strconcat("https://", ya->server, ya->path, "/api/info", NULL);
+	url = g_strconcat("https://", ya->server, ya->path, "/api/me", NULL);
 	rc_fetch_url(ya, url, NULL, NULL, NULL);
 	g_free(url);
 	
