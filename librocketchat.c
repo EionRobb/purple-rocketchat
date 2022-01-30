@@ -2220,10 +2220,10 @@ rc_process_frame(RocketChatAccount *rca, const gchar *frame)
 		return TRUE;
 	}
 	
-	root = json_parser_get_root(parser);
+	if (frame_type == 'a') {
 	
-	if (root != NULL) {
-		if (frame_type == 'a') {
+		root = json_parser_get_root(parser);
+		if (root != NULL) {
 			JsonArray *message_array = json_node_get_array(root);
 			guint i, len = json_array_get_length(message_array);
 			JsonParser *message_parser = json_parser_new();
@@ -2236,17 +2236,34 @@ rc_process_frame(RocketChatAccount *rca, const gchar *frame)
 				}
 			}
 			g_object_unref(message_parser);
-		} else if (frame_type == 'o') {
-			//Open frame
-		} else if (frame_type == 'c') {
-			//Close frame
-			purple_debug_error("rocketchat", "server closed the connection\n");
-		} else if (frame_type == 'h') {
-			//Heartbeat frame
-		} else {
-			//TODO is this going to happen?
-			purple_debug_error("rocketchat", "unknown frame type '%c'\n", frame_type);
 		}
+		
+	} else if (frame_type == 'o') {
+		//Open frame
+		JsonObject *response = json_object_new();
+		JsonArray *support = json_array_new();
+		
+		json_array_add_string_element(support, "1");
+		json_array_add_string_element(support, "pre2");
+		json_array_add_string_element(support, "pre1");
+		
+		json_object_set_string_member(response, "msg", "connect");
+		json_object_set_string_member(response, "version", "1");
+		json_object_set_array_member(response, "support", support);
+		
+		rc_socket_write_json(rca, response);
+		
+	} else if (frame_type == 'c') {
+		//Close frame
+		purple_debug_error("rocketchat", "server closed the connection\n");
+		
+	} else if (frame_type == 'h') {
+		//Heartbeat frame
+		
+	} else {
+		//TODO is this going to happen?
+		purple_debug_error("rocketchat", "unknown frame type '%c'\n", frame_type);
+		
 	}
 	
 	g_object_unref(parser);
