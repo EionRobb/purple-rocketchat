@@ -8,8 +8,7 @@ WIN32_CC ?= $(WIN32_DEV_TOP)/mingw-4.7.2/bin/gcc
 
 PKG_CONFIG ?= pkg-config
 
-REVISION_ID = $(shell hg id -i)
-REVISION_NUMBER = $(shell hg id -n)
+REVISION_ID = $(shell git rev-parse --short HEAD 2>/dev/null)
 DATE_FMT = %Y.%m.%d
 ifdef SOURCE_DATE_EPOCH
     BUILD_DATE ?= $(shell date -u -d "@$(SOURCE_DATE_EPOCH)" "+$(DATE_FMT)"  2>/dev/null || date -u -r "$(SOURCE_DATE_EPOCH)" "+$(DATE_FMT)" 2>/dev/null || date -u "+$(DATE_FMT)")
@@ -18,7 +17,7 @@ else
 endif
 
 ifneq ($(REVISION_ID),)
-PLUGIN_VERSION ?= 0.9.$(BUILD_DATE).hg.r$(REVISION_NUMBER).$(REVISION_ID)
+PLUGIN_VERSION ?= 0.9.$(BUILD_DATE).git.r$(REVISION_ID)
 else
 PLUGIN_VERSION ?= 0.9.$(BUILD_DATE)
 endif
