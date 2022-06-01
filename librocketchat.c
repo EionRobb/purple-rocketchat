@@ -108,7 +108,7 @@ g_str_insensitive_hash(gconstpointer v)
 #ifndef ROCKETCHAT_PLUGIN_VERSION
 #define ROCKETCHAT_PLUGIN_VERSION "0.1"
 #endif
-#define ROCKETCHAT_PLUGIN_WEBSITE "https://bitbucket.org/EionRobb/purple-rocketchat"
+#define ROCKETCHAT_PLUGIN_WEBSITE "https://github.com/EionRobb/purple-rocketchat"
 
 #define ROCKETCHAT_USERAGENT "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36"
 
@@ -2376,6 +2376,7 @@ rc_socket_write_json(RocketChatAccount *rca, JsonObject *data)
 	g_free(str);
 	json_node_free(node);
 	json_array_unref(data_array);
+	json_object_unref(data);
 }
 
 static void
