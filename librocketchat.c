@@ -2376,6 +2376,7 @@ rc_socket_write_json(RocketChatAccount *rca, JsonObject *data)
 	g_free(str);
 	json_node_free(node);
 	json_array_unref(data_array);
+	json_object_unref(data);
 }
 
 static void
