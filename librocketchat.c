@@ -2153,6 +2153,8 @@ rc_close(PurpleConnection *pc)
 	g_hash_table_unref(ya->one_to_ones_rev);
 	g_hash_table_remove_all(ya->group_chats);
 	g_hash_table_unref(ya->group_chats);
+	g_hash_table_remove_all(ya->group_chats_rev);
+	g_hash_table_unref(ya->group_chats_rev);
 	g_hash_table_remove_all(ya->sent_message_ids);
 	g_hash_table_unref(ya->sent_message_ids);
 	g_hash_table_remove_all(ya->result_callbacks);
@@ -2910,8 +2912,8 @@ rc_join_room(RocketChatAccount *ya, const gchar *room_id)
 	//["{\"msg\":\"method\",\"method\":\"getRoomRoles\",\"params\":[\"GENERAL\"],\"id\":\"15\"}"]
 	//["{\"msg\":\"method\",\"method\":\"getUsersOfRoom\",\"params\":[\"GENERAL\",true],\"id\":\"15\"}"]
 	//["{\"msg\":\"method\",\"method\":\"loadHistory\",\"params\":[\"GENERAL\",null,50,{\"$date\":1477203134888}],\"id\":\"5\"}"]
-	JsonObject *data = json_object_new();
-	JsonArray *params = json_array_new();
+	JsonObject *data;
+	JsonArray *params;
 	JsonObject *date;
 	gchar *id;
 	gchar *sub_id;
