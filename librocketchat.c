@@ -293,6 +293,7 @@ typedef struct {
 	RocketChatAccount *ya;
 	RocketChatProxyCallbackFunc callback;
 	gpointer user_data;
+	GDestroyNotify user_data_destroy_func;
 } RocketChatProxyConnection;
 
 
@@ -567,7 +568,7 @@ rc_get_next_id_str(RocketChatAccount *ya) {
 }
 
 static const gchar *
-rc_get_next_id_str_callback(RocketChatAccount *ya, RocketChatProxyCallbackFunc callback, gpointer user_data)
+rc_get_next_id_str_callback(RocketChatAccount *ya, RocketChatProxyCallbackFunc callback, gpointer user_data, GDestroyNotify user_data_destroy_func)
 {
 	const gchar *id = rc_get_next_id_str(ya);
 	RocketChatProxyConnection *proxy = g_new0(RocketChatProxyConnection, 1);
@@ -575,6 +576,7 @@ rc_get_next_id_str_callback(RocketChatAccount *ya, RocketChatProxyCallbackFunc c
 	proxy->ya = ya;
 	proxy->callback = callback;
 	proxy->user_data = user_data;
+	proxy->user_data_destroy_func = user_data_destroy_func;
 	
 	g_hash_table_insert(ya->result_callbacks, g_strdup(id), proxy);
 	
@@ -903,7 +905,7 @@ rc_set_two_factor_auth_code_cb(gpointer data, const gchar *twofactorcode)
 		json_object_set_string_member(response, "msg", "method");
 		json_object_set_string_member(response, "method", "login");
 		json_object_set_array_member(response, "params", params);
-		json_object_set_string_member(response, "id", rc_get_next_id_str_callback(ya, rc_login_response, NULL));
+		json_object_set_string_member(response, "id", rc_get_next_id_str_callback(ya, rc_login_response, NULL, NULL));
 		
 		rc_socket_write_json(ya, response);
 		
@@ -1175,7 +1177,7 @@ rc_account_connected(RocketChatAccount *ya, JsonNode *node, gpointer user_data, 
 	json_object_set_string_member(data, "msg", "method");
 	json_object_set_string_member(data, "method", "rooms/get");
 	json_object_set_array_member(data, "params", params);
-	json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_got_open_rooms, NULL));
+	json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_got_open_rooms, NULL, NULL));
 	
 	rc_socket_write_json(ya, data);
 	
@@ -1196,7 +1198,7 @@ rc_account_connected(RocketChatAccount *ya, JsonNode *node, gpointer user_data, 
 	json_object_set_string_member(data, "msg", "method");
 	json_object_set_string_member(data, "method", "browseChannels");
 	json_object_set_array_member(data, "params", params);
-	json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_got_available_channels, NULL));
+	json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_got_available_channels, NULL, NULL));
 	
 	rc_socket_write_json(ya, data);
 	
@@ -1751,7 +1753,7 @@ rc_process_msg(RocketChatAccount *ya, JsonNode *element_node)
 		json_object_set_string_member(response, "msg", "method");
 		json_object_set_string_member(response, "method", "login");
 		json_object_set_array_member(response, "params", params);
-		json_object_set_string_member(response, "id", rc_get_next_id_str_callback(ya, rc_login_response, NULL));
+		json_object_set_string_member(response, "id", rc_get_next_id_str_callback(ya, rc_login_response, NULL, NULL));
 		
 		
 	} else if (purple_strequal(msg, "result")) {
@@ -1917,14 +1919,14 @@ rc_roomlist_get_list(PurpleConnection *pc)
 		json_object_set_string_member(data, "msg", "method");
 		json_object_set_string_member(data, "method", "channelsList");
 		json_object_set_array_member(data, "params", params);
-		json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_roomlist_got_list, roomlist));
+		json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_roomlist_got_list, roomlist, NULL));
 		
 		json_object_ref(data);
 		rc_socket_write_json(ya, data);
 		
 		// Send the same request again without the second parameter for older servers
 		json_array_remove_element(params, 1);
-		json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_roomlist_got_list, roomlist));
+		json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_roomlist_got_list, roomlist, NULL));
 		rc_socket_write_json(ya, data);
 	}
 	
@@ -2039,6 +2041,16 @@ static gulong chat_conversation_typing_signal = 0;
 static void rc_mark_conv_seen(PurpleConversation *conv, PurpleConversationUpdateType type);
 static gulong conversation_updated_signal = 0;
 
+static void
+rc_free_proxy(gpointer data)
+{
+	RocketChatProxyConnection *proxy = (RocketChatProxyConnection*)data;
+	if (proxy->user_data && proxy->user_data_destroy_func) {
+		(proxy->user_data_destroy_func)(proxy->user_data);
+	}
+	g_free(data);
+}
+
 void
 rc_login(PurpleAccount *account)
 {
@@ -2073,7 +2085,7 @@ rc_login(PurpleAccount *account)
 	ya->group_chats = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
 	ya->group_chats_rev = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
 	ya->sent_message_ids = g_hash_table_new_full(g_str_insensitive_hash, g_str_insensitive_equal, g_free, NULL);
-	ya->result_callbacks = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+	ya->result_callbacks = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, rc_free_proxy);
 	ya->usernames_to_ids = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
 	ya->ids_to_usernames = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
 	ya->received_message_queue = g_queue_new();
@@ -2806,8 +2818,6 @@ rc_got_users_of_room(RocketChatAccount *ya, JsonNode *node, gpointer user_data, 
 		g_list_free(users);
 		g_list_free(flags);
 	}
-	
-	g_free(room_id);
 }
 
 static void
@@ -2836,8 +2846,6 @@ rc_got_history_of_room(RocketChatAccount *ya, JsonNode *node, gpointer user_data
 	if (rolling_last_message_timestamp != 0) {
 		rc_set_room_last_timestamp(ya, room_id, rolling_last_message_timestamp);
 	}
-	
-	g_free(room_id);
 }
 
 
@@ -2963,7 +2971,7 @@ rc_join_room(RocketChatAccount *ya, const gchar *room_id)
 	json_object_set_string_member(data, "msg", "method");
 	json_object_set_string_member(data, "method", "getUsersOfRoom");
 	json_object_set_array_member(data, "params", params);
-	json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_got_users_of_room, g_strdup(room_id)));
+	json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_got_users_of_room, g_strdup(room_id), g_free));
 	
 	rc_socket_write_json(ya, data);
 	
@@ -2982,7 +2990,7 @@ rc_join_room(RocketChatAccount *ya, const gchar *room_id)
 		json_object_set_string_member(data, "msg", "method");
 		json_object_set_string_member(data, "method", "loadHistory");
 		json_object_set_array_member(data, "params", params);
-		json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_got_history_of_room, g_strdup(room_id)));
+		json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_got_history_of_room, g_strdup(room_id), g_free));
 		
 		rc_socket_write_json(ya, data);
 	}
@@ -3045,7 +3053,7 @@ rc_join_chat(PurpleConnection *pc, GHashTable *chatdata)
 		json_object_set_string_member(data, "msg", "method");
 		json_object_set_string_member(data, "method", "getRoomIdByNameOrId");
 		json_object_set_array_member(data, "params", params);
-		json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_got_chat_name_id, chatdata));
+		json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_got_chat_name_id, chatdata, NULL));
 		
 		rc_socket_write_json(ya, data);
 		
@@ -3372,7 +3380,7 @@ const gchar *who, const gchar *message, PurpleMessageFlags flags)
 		json_object_set_string_member(data, "msg", "method");
 		json_object_set_string_member(data, "method", "createDirectMessage");
 		json_object_set_array_member(data, "params", params);
-		json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_created_direct_message_send, msg));
+		json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_created_direct_message_send, msg, NULL));
 	
 		rc_socket_write_json(ya, data);
 		return 1;
@@ -3495,7 +3503,7 @@ rc_add_buddy(PurpleConnection *pc, PurpleBuddy *buddy, PurpleGroup *group
 	json_object_set_string_member(data, "msg", "method");
 	json_object_set_string_member(data, "method", "createDirectMessage");
 	json_object_set_array_member(data, "params", params);
-	json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_created_direct_message, buddy));
+	json_object_set_string_member(data, "id", rc_get_next_id_str_callback(ya, rc_created_direct_message, buddy, NULL));
 	
 	rc_socket_write_json(ya, data);
 	
