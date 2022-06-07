@@ -718,6 +718,7 @@ gpointer user_data, const gchar *url_text, gsize len, const gchar *error_message
 		gchar *error_msg_formatted = g_strdup_printf(_("Connection error: %s."), error_message);
 		purple_connection_error(conn->ya->pc, PURPLE_CONNECTION_ERROR_NETWORK_ERROR, error_msg_formatted);
 		g_free(error_msg_formatted);
+		g_object_unref(parser);
 		g_free(conn);
 		return;
 	}
