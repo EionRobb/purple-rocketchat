@@ -49,5 +49,13 @@ You'll also need [libjson-glib-1.0.dll](https://eion.robbmob.com/libjson-glib-1.
 * Click the "Get List" button
 * Add the chat to your buddy list
 
+## Auth Issues? ##
+If you're getting "Bad Username/Password" errors, and you're definitely sure that you're using the right username/password, or if your Rocket.Chat instance uses a 3rd party for authentication (eg Ookla, Google or Microsoft) then you'll need to make a Personal Access Token:
+* In the official Rocket.Chat app, click on your profile then  My Account -> Personal Access Token
+* Add a new PAT without 2FA
+* Copy-paste the token and user-id fields into Tools -> Accounts -> {Your rocket.chat account} -> Advanced -> Personal Access Token (and User ID) fields in Pidgin
+More info about PATs at https://docs.rocket.chat/guides/user-guides/user-panel/managing-your-account/personal-access-token
+
+
 ## Like this plugin? ##
 Say "Thanks" by [sending $1](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=PZMBF2QVF69GA)
