@@ -718,10 +718,37 @@ gpointer user_data, const gchar *url_text, gsize len, const gchar *error_message
 		gchar *error_msg_formatted = g_strdup_printf(_("Connection error: %s."), error_message);
 		purple_connection_error(conn->ya->pc, PURPLE_CONNECTION_ERROR_NETWORK_ERROR, error_msg_formatted);
 		g_free(error_msg_formatted);
-		g_object_unref(parser);
-		g_free(conn);
-		return;
+		goto out;
 	}
+#if !PURPLE_VERSION_CHECK(3, 0, 0)
+    else {
+        /* Purple 2.x doesn't check for the http status to be successful so let's
+         * do that here quick.
+         * Borrowed and then adapted from purple2compat http.c
+         */
+        if (!error_message) {
+            gsize header_len = (body + 4 - url_text);
+            gchar header[header_len];
+            g_strlcpy(header, url_text, header_len);
+            gchar** header_by_word = g_strsplit_set(header, " ", 2);
+            gint code = -1;
+
+            sscanf(header_by_word[1], "%d", &code);
+            g_strfreev(header_by_word);
+
+            if (!(code <= 0 || code / 100 == 2)) {
+                gchar *error_msg_formatted = g_strdup_printf(
+                    _("Connection error: Invalid HTTP response code (%d)."),
+                                                             code);
+                purple_connection_error(conn->ya->pc,
+                                        PURPLE_CONNECTION_ERROR_NETWORK_ERROR,
+                                        error_msg_formatted);
+                g_free(error_msg_formatted);
+                goto out;
+            }
+        }
+    }
+#endif
 	if (body != NULL && !json_parser_load_from_data(parser, body, body_len, NULL)) {
 		//purple_debug_error("rocketchat", "Error parsing response: %s\n", body);
 		if (conn->callback) {
@@ -747,9 +774,12 @@ gpointer user_data, const gchar *url_text, gsize len, const gchar *error_message
 			conn->callback(conn->ya, root, conn->user_data, NULL);
 		}
 	}
-	
+
+out:
 	g_object_unref(parser);
 	g_free(conn);
+
+    return;
 }
 
 static void
