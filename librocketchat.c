@@ -2071,6 +2071,8 @@ static guint rc_conv_send_typing(PurpleConversation *conv, PurpleIMTypingState s
 static gulong chat_conversation_typing_signal = 0;
 static void rc_mark_conv_seen(PurpleConversation *conv, PurpleConversationUpdateType type);
 static gulong conversation_updated_signal = 0;
+static void rc_login_me_cb(RocketChatAccount *ya, JsonNode *node, gpointer user_data,
+               JsonObject *error);
 
 static void
 rc_free_proxy(gpointer data)
@@ -2161,20 +2163,33 @@ rc_login(PurpleAccount *account)
 
 	//Build the initial hash tables from the current buddy list
 	rc_build_groups_from_blist(ya);
-	
-	//TODO do something with this callback to make sure it's actually a rocket.chat server
+
 	url = g_strconcat("https://", ya->server, ya->path, "/api/me", NULL);
-	rc_fetch_url(ya, url, NULL, NULL, NULL);
+	rc_fetch_url(ya, url, NULL, rc_login_me_cb, NULL);
 	g_free(url);
-	
+}
+
+
+static void
+rc_login_me_cb(RocketChatAccount *ya, JsonNode *node, gpointer user_data,
+               JsonObject *error)
+{
+    if(!ya) return;
+    // TODO: Add else that parses the error status
+
 	rc_start_socket(ya);
-	
-	
+
 	if (!chat_conversation_typing_signal) {
-		chat_conversation_typing_signal = purple_signal_connect(purple_conversations_get_handle(), "chat-conversation-typing", purple_connection_get_protocol(pc), PURPLE_CALLBACK(rc_conv_send_typing), NULL);
+		chat_conversation_typing_signal = purple_signal_connect(
+            purple_conversations_get_handle(), "chat-conversation-typing",
+            purple_connection_get_protocol(ya->pc), PURPLE_CALLBACK(rc_conv_send_typing),
+            NULL);
 	}
 	if (!conversation_updated_signal) {
-		conversation_updated_signal = purple_signal_connect(purple_conversations_get_handle(), "conversation-updated", purple_connection_get_protocol(pc), PURPLE_CALLBACK(rc_mark_conv_seen), NULL);
+		conversation_updated_signal = purple_signal_connect(
+            purple_conversations_get_handle(), "conversation-updated",
+            purple_connection_get_protocol(ya->pc), PURPLE_CALLBACK(rc_mark_conv_seen),
+            NULL);
 	}
 }
 
