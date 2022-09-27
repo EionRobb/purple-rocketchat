@@ -263,6 +263,7 @@ typedef struct {
 
 	gchar *username;
 	gchar *server;
+    gchar *websocket_server;
 	gchar *path;
 	gboolean tls;
 	gchar *http_str;
@@ -832,6 +833,11 @@ rc_fetch_url(RocketChatAccount *ya, const gchar *url, const gchar *postdata, Roc
 #if PURPLE_VERSION_CHECK(3, 0, 0)
 	
 	PurpleHttpRequest *request = purple_http_request_new(url);
+    if (!purple_strequal(ya->websocket_server, ya->server)) {
+		purple_http_request_header_set(request, "Host", ya->websocket_server);
+		purple_debug_misc("rocketchat" , "Proxy enabled, sending %s instead of %s\n",
+						  host, ya->server);
+    }
 	purple_http_request_header_set(request, "Accept", "*/*");
 	purple_http_request_header_set(request, "User-Agent", ROCKETCHAT_USERAGENT);
 	purple_http_request_header_set(request, "Cookie", cookies);
@@ -864,9 +870,15 @@ rc_fetch_url(RocketChatAccount *ya, const gchar *url, const gchar *postdata, Roc
 	gchar *host = NULL, *path = NULL, *user = NULL, *password = NULL;
 	int port;
 	purple_url_parse(url, &host, &port, &path, &user, &password);
-	
+
 	headers = g_string_new(NULL);
-	
+
+	if (!purple_strequal(ya->websocket_server, ya->server)) {
+		host = g_strdup(ya->websocket_server);
+		purple_debug_misc("rocketchat" , "Proxy enabled, sending %s instead of %s\n",
+						  host, ya->server);
+	}
+
 	//Use the full 'url' until libpurple can handle path's longer than 256 chars
 	g_string_append_printf(headers, "%s /%s HTTP/1.0\r\n", (postdata ? "POST" : "GET"), path);
 	//g_string_append_printf(headers, "%s %s HTTP/1.0\r\n", (postdata ? "POST" : "GET"), url);
@@ -2126,6 +2138,7 @@ rc_login(PurpleAccount *account)
 	gchar *url;
 	PurpleConnectionFlags pc_flags;
     const char *connection_security;
+    char *proxy;
 	
 	pc_flags = purple_connection_get_flags(pc);
 	pc_flags |= PURPLE_CONNECTION_FLAG_HTML;
@@ -2182,7 +2195,15 @@ rc_login(PurpleAccount *account)
 		ya->http_str = g_strdup("https://");
 	}
 
-		ya->session_token = g_strdup(purple_account_get_string(account, "personal_access_token", NULL));
+	ya->websocket_server = g_strdup(ya->server);
+	purple_debug_info("rocketchat", "websocket_server: %s\n", ya->websocket_server);
+
+	proxy = g_strdup(purple_account_get_string(account, "proxy", NULL));
+	if (proxy && !purple_strequal(proxy, "")) {
+		ya->server = proxy;
+	}
+
+	ya->session_token = g_strdup(purple_account_get_string(account, "personal_access_token", NULL));
 	if (ya->session_token && *ya->session_token) {
 		const gchar *user_id = purple_account_get_string(account, "personal_access_token_user_id", NULL);
 		
@@ -2294,6 +2315,7 @@ rc_close(PurpleConnection *pc)
 	g_free(ya->username); ya->username = NULL;
 	g_free(ya->server); ya->server = NULL;
     g_free(ya->http_str); ya->http_str = NULL;
+    g_free(ya->websocket_server);  ya->websocket_server = NULL;
 	g_free(ya->path); ya->path = NULL;
 	g_free(ya->frame); ya->frame = NULL;
 	g_free(ya->session_token); ya->session_token = NULL;
@@ -2681,8 +2703,11 @@ rc_socket_upgrade(RocketChatAccount *ya)
 							"User-Agent: " ROCKETCHAT_USERAGENT "\r\n"
 							"Cookie: %s\r\n"
 							//"Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits\r\n"
-							"\r\n", url->str, ya->server,
+							"\r\n", url->str, ya->websocket_server,
 							websocket_key, cookies);
+
+	purple_debug_misc("rocketchat", "websocket_header: %s",
+					  websocket_header);
 	rc_sock_write(ya, websocket_header, strlen(websocket_header));
 
 	g_free(websocket_header);
@@ -3793,6 +3818,9 @@ rc_add_account_options(GList *account_options)
 
 	option = purple_account_option_list_new(_("Connection security"),
                                             "connection_security", encryption_values);
+	account_options = g_list_append(account_options, option);
+
+	option = purple_account_option_string_new(N_("Proxy"), "proxy", "");
 	account_options = g_list_append(account_options, option);
 
 	return account_options;
