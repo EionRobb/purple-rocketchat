@@ -4084,8 +4084,8 @@ static PurplePluginInfo info = {
 	ROCKETCHAT_PLUGIN_ID, /* id */
 	"Rocket.Chat", /* name */
 	ROCKETCHAT_PLUGIN_VERSION, /* version */
-	"", /* summary */
-	"", /* description */
+	"Rocket.Chat Protocol Plugins.", /* summary */
+	"Adds Rocket.Chat protocol support to libpurple.", /* description */
 	"Eion Robb <eion@robbmob.com>", /* author */
 	ROCKETCHAT_PLUGIN_WEBSITE, /* homepage */
 	libpurple2_plugin_load, /* load */
