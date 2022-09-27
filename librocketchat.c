@@ -23,6 +23,10 @@
 #define g_hash_table_contains(hash_table, key) g_hash_table_lookup_extended(hash_table, key, NULL, NULL)
 #endif /* 2.32.0 */
 
+#if !GLIB_CHECK_VERSION(2, 68, 0) && !PURPLE_VERSION_CHECK(2, 14, 2)
+#define g_memdump2 g_memdump
+#endif
+
 static gboolean
 g_str_insensitive_equal(gconstpointer v1, gconstpointer v2)
 {
@@ -3682,7 +3686,7 @@ rc_got_avatar(RocketChatAccount *ya, JsonNode *node, gpointer user_data, JsonObj
 		
 		response_str = g_dataset_get_data(node, "raw_body");
 		response_len = json_object_get_int_member(response, "len");
-		response_dup = g_memdup(response_str, response_len);
+		response_dup = g_memdup2(response_str, response_len);
 		
 		purple_buddy_icons_set_for_user(ya->account, purple_buddy_get_name(buddy), response_dup, response_len, NULL);
 	}
