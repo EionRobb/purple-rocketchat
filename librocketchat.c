@@ -2443,15 +2443,16 @@ static void
 rc_socket_got_data(gpointer userdata, PurpleSslConnection *conn, PurpleInputCondition cond)
 {
 	RocketChatAccount *ya = userdata;
-	guchar length_code;
+	guchar length_code = -1;
+	gint ping_frame_len = -1;
 	int read_len = 0;
 	gboolean done_some_reads = FALSE;
-	
-	
+
+
 	if (G_UNLIKELY(!ya->websocket_header_received)) {
 		gint nlbr_count = 0;
 		gchar nextchar;
-		
+
 		while(nlbr_count < 4 && (read_len = purple_ssl_read(conn, &nextchar, 1)) == 1) {
 			if (nextchar == '\r' || nextchar == '\n') {
 				nlbr_count++;
@@ -2459,7 +2460,7 @@ rc_socket_got_data(gpointer userdata, PurpleSslConnection *conn, PurpleInputCond
 				nlbr_count = 0;
 			}
 		}
-		
+
 		if (nlbr_count == 4) {
 			ya->websocket_header_received = TRUE;
 			done_some_reads = TRUE;
@@ -2467,24 +2468,23 @@ rc_socket_got_data(gpointer userdata, PurpleSslConnection *conn, PurpleInputCond
 			/* flush stuff that we attempted to send before the websocket was ready */
 			while (ya->pending_writes) {
 				rc_socket_write_json(ya, ya->pending_writes->data);
-				ya->pending_writes = g_slist_delete_link(ya->pending_writes, ya->pending_writes);
+				ya->pending_writes = g_slist_delete_link(ya->pending_writes,
+														 ya->pending_writes);
 			}
 		}
 	}
-	
+
 	while(ya->frame || (read_len = purple_ssl_read(conn, &ya->packet_code, 1)) == 1) {
 		if (!ya->frame) {
 			if (ya->packet_code != 129) {
+
 				if (ya->packet_code == 136) {
 					purple_debug_error("rocketchat", "websocket closed\n");
-					
-					// Try reconnect
-					rc_start_socket(ya);
-					
-					return;
-				} else if (ya->packet_code == 137) {
+					goto try_reconnect;
+				}
+
+				if (ya->packet_code == 137) {
 					// Ping
-					gint ping_frame_len;
 					length_code = 0;
 					purple_ssl_read(conn, &length_code, 1);
 					if (length_code <= 125) {
@@ -2509,13 +2509,12 @@ rc_socket_got_data(gpointer userdata, PurpleSslConnection *conn, PurpleInputCond
 					return;
 				} else if (ya->packet_code == 138) {
 					// Pong
-					//who cares
 					return;
 				}
 				purple_debug_error("rocketchat", "unknown websocket error %d\n", ya->packet_code);
 				return;
 			}
-			
+
 			length_code = 0;
 			purple_ssl_read(conn, &length_code, 1);
 			if (length_code <= 125) {
@@ -2529,11 +2528,11 @@ rc_socket_got_data(gpointer userdata, PurpleSslConnection *conn, PurpleInputCond
 				ya->frame_len = GUINT64_FROM_BE(ya->frame_len);
 			}
 			//purple_debug_info("rocketchat", "frame_len: %" G_GUINT64_FORMAT "\n", ya->frame_len);
-			
+
 			ya->frame = g_new0(gchar, ya->frame_len + 1);
 			ya->frame_len_progress = 0;
 		}
-		
+
 		do {
 			read_len = purple_ssl_read(conn, ya->frame + ya->frame_len_progress, ya->frame_len - ya->frame_len_progress);
 			if (read_len > 0) {
@@ -2541,35 +2540,48 @@ rc_socket_got_data(gpointer userdata, PurpleSslConnection *conn, PurpleInputCond
 			}
 		} while (read_len > 0 && ya->frame_len_progress < ya->frame_len);
 		done_some_reads = TRUE;
-		
+
 		if (ya->frame_len_progress == ya->frame_len) {
 			gboolean success = rc_process_frame(ya, ya->frame);
 			g_free(ya->frame); ya->frame = NULL;
 			ya->packet_code = 0;
 			ya->frame_len = 0;
-			
+
 			if (G_UNLIKELY(ya->websocket == NULL || success == FALSE)) {
 				return;
 			}
-		} else {
+		}
+    }
+	if (!done_some_reads && read_len <= 0) {
+		if (read_len == -1 && (errno == EAGAIN ||
+							   errno == EINPROGRESS ||
+							   errno == ENOENT)) {
 			return;
 		}
-	}
 
-	if (done_some_reads == FALSE && read_len <= 0) {
-		if (read_len < 0 && errno == EAGAIN) {
-			return;
-		}
-
-		purple_debug_error("rocketchat", "got errno %d, read_len %d from websocket thread\n", errno, read_len);
+		purple_debug_error("rocketchat",
+						   "Got errno %d: %s, read_len %d from websocket thread\n",
+						   errno, g_strerror(errno), read_len);
 
 		if (ya->frames_since_reconnect < 2) {
-			purple_connection_error(ya->pc, PURPLE_CONNECTION_ERROR_NETWORK_ERROR, "Lost connection to server");
+			goto connection_error;
 		} else {
-			// Try reconnect
-			rc_start_socket(ya);
+			goto try_reconnect;
 		}
 	}
+
+	return;
+
+try_reconnect:
+	rc_start_socket(ya);
+	return;
+
+connection_error:
+	purple_connection_error(ya->pc,
+							PURPLE_CONNECTION_ERROR_NETWORK_ERROR,
+							g_strdup_printf(_("Lost connection to server: %s"),
+											g_strerror(errno)));
+	return;
 }
 
 static void
