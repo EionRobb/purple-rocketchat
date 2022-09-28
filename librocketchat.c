@@ -248,30 +248,34 @@ purple_message_destroy(PurpleMessage *message)
 typedef struct {
 	PurpleAccount *account;
 	PurpleConnection *pc;
-	
+	PurpleSslConnection *websocket;
+	int inpa;
+	int fd;
+
 	GHashTable *cookie_table;
 	gchar *session_token;
 	gchar *channel;
 	gchar *self_user;
 	gchar *self_user_id;
-	
+
 	gint64 last_message_timestamp;
 	gint64 last_load_last_message_timestamp;
-	
+
 	gchar *username;
 	gchar *server;
 	gchar *path;
-	
-	PurpleSslConnection *websocket;
+	gboolean tls;
+	gchar *http_str;
+
 	gboolean websocket_header_received;
 	gboolean sync_complete;
 	guchar packet_code;
 	gchar *frame;
 	guint64 frame_len;
 	guint64 frame_len_progress;
-	
+
 	gint64 id; //incrementing counter
-	
+
 	GHashTable *one_to_ones;      // A store of known room_id's -> username's
 	GHashTable *one_to_ones_rev;  // A store of known usernames's -> room_id's
 	GHashTable *group_chats;      // A store of known multi-user room_id's -> room name's
@@ -682,6 +686,29 @@ rc_cookies_to_string(RocketChatAccount *ya)
 	return g_string_free(str, FALSE);
 }
 
+
+size_t rc_sock_read(RocketChatAccount *ya, gpointer sock, void *buf, size_t len)
+{
+	if (ya->tls) {
+		 return purple_ssl_read(sock, buf, len);
+	}
+
+	g_return_val_if_fail(ya->fd > 0, -1);
+	return read(ya->fd, buf, len);
+}
+
+// modeled after libpurple/jabber.c:js_do_send()
+static int rc_sock_write(RocketChatAccount *ya, void *data, int len) {
+	int ret;
+
+	if (ya->tls)
+		ret = purple_ssl_write(ya->websocket, data, len);
+	else
+		ret = write(ya->fd, data, len);
+
+	return ret;
+}
+
 static void
 rc_response_callback(PurpleHttpConnection *http_conn, 
 #if PURPLE_VERSION_CHECK(3, 0, 0)
@@ -988,7 +1015,8 @@ rc_login_response(RocketChatAccount *ya, JsonNode *node, gpointer user_data, Jso
 	//a["{\"msg\":\"result\",\"id\":\"5\",\"error\":{\"error\":403,\"reason\":\"User has no password set\",\"message\":\"User has no password set [403]\",\"errorType\":\"Meteor.Error\"}}"]
 	
 	// Download all user presence (requires the session_token)
-	gchar *url = g_strconcat("https://", ya->server, ya->path, "/api/v1/users.presence", NULL);
+	gchar *url = g_strconcat(ya->http_str, ya->server, ya->path,
+                             "/api/v1/users.presence", NULL);
 	rc_fetch_url(ya, url, NULL, rc_got_users_presence, NULL);
 	g_free(url);
 }
@@ -1426,7 +1454,11 @@ rc_process_room_message(RocketChatAccount *ya, JsonObject *message_obj, JsonObje
 					const gchar *title_link = json_object_get_string_member(attachment, "title_link");
 					
 					if (title != NULL && title_link != NULL) {
-						gchar *temp_message = g_strdup_printf("%s <a href=\"https://%s%s%s\">%s</a>", (message ? message : ""), ya->server, ya->path, title_link, title);
+						gchar *temp_message = g_strdup_printf("%s <a href=\"%s%s%s%s\">%s</a>"
+                                                              , (message ? message : ""),
+                                                              ya->http_str,
+                                                              ya->server, ya->path,
+                                                              title_link, title);
 						g_free(message);
 						message = temp_message;
 					}
@@ -2093,6 +2125,7 @@ rc_login(PurpleAccount *account)
 	const gchar *username = purple_account_get_username(account);
 	gchar *url;
 	PurpleConnectionFlags pc_flags;
+    const char *connection_security;
 	
 	pc_flags = purple_connection_get_flags(pc);
 	pc_flags |= PURPLE_CONNECTION_FLAG_HTML;
@@ -2137,9 +2170,19 @@ rc_login(PurpleAccount *account)
 	ya->server = g_strdup(userparts[1]);
 	ya->path = g_strdup(purple_account_get_string(account, "server_path", ""));
 	g_strfreev(userparts);
-	
-	
-	ya->session_token = g_strdup(purple_account_get_string(account, "personal_access_token", NULL));
+
+	connection_security = purple_account_get_string(account, "connection_security", "tls");
+	purple_debug_info("rocketchat", "connection-security: %s\n", connection_security);
+
+	if (!purple_strequal(connection_security, "tls")) {
+	   ya->tls = FALSE;
+	   ya->http_str = g_strdup("http://");
+	} else {
+		ya->tls = TRUE;
+		ya->http_str = g_strdup("https://");
+	}
+
+		ya->session_token = g_strdup(purple_account_get_string(account, "personal_access_token", NULL));
 	if (ya->session_token && *ya->session_token) {
 		const gchar *user_id = purple_account_get_string(account, "personal_access_token_user_id", NULL);
 		
@@ -2164,7 +2207,7 @@ rc_login(PurpleAccount *account)
 	//Build the initial hash tables from the current buddy list
 	rc_build_groups_from_blist(ya);
 
-	url = g_strconcat("https://", ya->server, ya->path, "/api/me", NULL);
+	url = g_strconcat(ya->http_str, ya->server, ya->path, "/api/me", NULL);
 	rc_fetch_url(ya, url, NULL, rc_login_me_cb, NULL);
 	g_free(url);
 }
@@ -2199,12 +2242,22 @@ rc_close(PurpleConnection *pc)
 {
 	RocketChatAccount *ya = purple_connection_get_protocol_data(pc);
 	// PurpleAccount *account;
-	
+
 	g_return_if_fail(ya != NULL);
-	
+
 	// account = purple_connection_get_account(pc);
-	if (ya->websocket != NULL) purple_ssl_close(ya->websocket);
-	
+	if (ya->websocket != NULL)
+		purple_ssl_close(ya->websocket);
+	else if (ya->fd > 0) {
+#if !PURPLE_VERSION_CHECK(3, 0, 0)
+		if (ya->pc->inpa)
+			purple_input_remove(ya->pc->inpa);
+		close(ya->fd);
+#else
+		//FIXME Purple 3.x
+#endif
+	}
+
 	g_hash_table_remove_all(ya->one_to_ones);
 	g_hash_table_unref(ya->one_to_ones);
 	g_hash_table_remove_all(ya->one_to_ones_rev);
@@ -2240,6 +2293,7 @@ rc_close(PurpleConnection *pc)
 	g_hash_table_destroy(ya->cookie_table); ya->cookie_table = NULL;
 	g_free(ya->username); ya->username = NULL;
 	g_free(ya->server); ya->server = NULL;
+    g_free(ya->http_str); ya->http_str = NULL;
 	g_free(ya->path); ya->path = NULL;
 	g_free(ya->frame); ya->frame = NULL;
 	g_free(ya->session_token); ya->session_token = NULL;
@@ -2384,9 +2438,9 @@ rc_socket_write_data(RocketChatAccount *ya, guchar *data, gsize data_len, guchar
 	
 	memmove(full_data + (1 + len_size), &mkey, 4);
 	memmove(full_data + (1 + len_size + 4), data, data_len);
-	
-	purple_ssl_write(ya->websocket, full_data, 1 + data_len + len_size + 4);
-	
+
+	rc_sock_write(ya, full_data, 1 + data_len + len_size + 4);
+
 	g_free(full_data);
 	g_free(data);
 }
@@ -2401,7 +2455,7 @@ rc_socket_write_json(RocketChatAccount *rca, JsonObject *data)
 	gsize len;
 	JsonGenerator *generator;
 	
-	if (rca->websocket == NULL) {
+	if ((rca->websocket == NULL && rca->tls) || (rca->fd == -1 && !rca->tls)) {
 		if (data != NULL) {
 			rca->pending_writes = g_slist_append(rca->pending_writes, data);
 		}
@@ -2440,9 +2494,10 @@ rc_socket_write_json(RocketChatAccount *rca, JsonObject *data)
 }
 
 static void
-rc_socket_got_data(gpointer userdata, PurpleSslConnection *conn, PurpleInputCondition cond)
+rc_socket_got_data(gpointer data, PurpleSslConnection *gsc)
 {
-	RocketChatAccount *ya = userdata;
+	PurpleConnection *pc = data;
+	RocketChatAccount *ya = purple_connection_get_protocol_data(pc);
 	guchar length_code = -1;
 	gint ping_frame_len = -1;
 	int read_len = 0;
@@ -2453,7 +2508,7 @@ rc_socket_got_data(gpointer userdata, PurpleSslConnection *conn, PurpleInputCond
 		gint nlbr_count = 0;
 		gchar nextchar;
 
-		while(nlbr_count < 4 && (read_len = purple_ssl_read(conn, &nextchar, 1)) == 1) {
+		while(nlbr_count < 4 && (read_len = rc_sock_read(ya, gsc, &nextchar, 1)) == 1) {
 			if (nextchar == '\r' || nextchar == '\n') {
 				nlbr_count++;
 			} else {
@@ -2474,7 +2529,7 @@ rc_socket_got_data(gpointer userdata, PurpleSslConnection *conn, PurpleInputCond
 		}
 	}
 
-	while(ya->frame || (read_len = purple_ssl_read(conn, &ya->packet_code, 1)) == 1) {
+	while(ya->frame || (read_len = rc_sock_read(ya, gsc, &ya->packet_code, 1)) == 1) {
 		if (!ya->frame) {
 			if (ya->packet_code != 129) {
 
@@ -2486,20 +2541,20 @@ rc_socket_got_data(gpointer userdata, PurpleSslConnection *conn, PurpleInputCond
 				if (ya->packet_code == 137) {
 					// Ping
 					length_code = 0;
-					purple_ssl_read(conn, &length_code, 1);
+					rc_sock_read(ya, gsc, &length_code, 1);
 					if (length_code <= 125) {
 						ping_frame_len = length_code;
 					} else if (length_code == 126) {
 						guchar len_buf[2];
-						purple_ssl_read(conn, len_buf, 2);
+						rc_sock_read(ya, gsc, len_buf, 2);
 						ping_frame_len = (len_buf[0] << 8) + len_buf[1];
 					} else if (length_code == 127) {
-						purple_ssl_read(conn, &ping_frame_len, 8);
+						rc_sock_read(ya, gsc, &ping_frame_len, 8);
 						ping_frame_len = GUINT64_FROM_BE(ping_frame_len);
 					}
 					if (ping_frame_len) {
 						guchar *pong_data = g_new0(guchar, ping_frame_len);
-						purple_ssl_read(conn, pong_data, ping_frame_len);
+						rc_sock_read(ya, gsc, pong_data, ping_frame_len);
 
 						rc_socket_write_data(ya, pong_data, ping_frame_len, 138);
 						g_free(pong_data);
@@ -2515,26 +2570,26 @@ rc_socket_got_data(gpointer userdata, PurpleSslConnection *conn, PurpleInputCond
 				return;
 			}
 
-			length_code = 0;
-			purple_ssl_read(conn, &length_code, 1);
-			if (length_code <= 125) {
-				ya->frame_len = length_code;
-			} else if (length_code == 126) {
-				guchar len_buf[2];
-				purple_ssl_read(conn, len_buf, 2);
-				ya->frame_len = (len_buf[0] << 8) + len_buf[1];
-			} else if (length_code == 127) {
-				purple_ssl_read(conn, &ya->frame_len, 8);
-				ya->frame_len = GUINT64_FROM_BE(ya->frame_len);
-			}
-			//purple_debug_info("rocketchat", "frame_len: %" G_GUINT64_FORMAT "\n", ya->frame_len);
+            length_code = 0;
+            rc_sock_read(ya, gsc, &length_code, 1);
+            if (length_code <= 125) {
+                ya->frame_len = length_code;
+            } else if (length_code == 126) {
+                guchar len_buf[2];
+			    rc_sock_read(ya, gsc, len_buf, 2);
+                ya->frame_len = (len_buf[0] << 8) + len_buf[1];
+            } else if (length_code == 127) {
+                rc_sock_read(ya, gsc, &ya->frame_len, 8);
+                ya->frame_len = GUINT64_FROM_BE(ya->frame_len);
+            }
+            //purple_debug_info("rocketchat", "frame_len: %" G_GUINT64_FORMAT "\n", ya->frame_len);
 
-			ya->frame = g_new0(gchar, ya->frame_len + 1);
-			ya->frame_len_progress = 0;
-		}
+            ya->frame = g_new0(gchar, ya->frame_len + 1);
+            ya->frame_len_progress = 0;
+        }
 
 		do {
-			read_len = purple_ssl_read(conn, ya->frame + ya->frame_len_progress, ya->frame_len - ya->frame_len_progress);
+			read_len = rc_sock_read(ya, gsc, ya->frame + ya->frame_len_progress, ya->frame_len - ya->frame_len_progress);
 			if (read_len > 0) {
 				ya->frame_len_progress += read_len;
 			}
@@ -2547,10 +2602,16 @@ rc_socket_got_data(gpointer userdata, PurpleSslConnection *conn, PurpleInputCond
 			ya->packet_code = 0;
 			ya->frame_len = 0;
 
-			if (G_UNLIKELY(ya->websocket == NULL || success == FALSE)) {
-				return;
+			if (ya->tls) {
+				if (G_UNLIKELY(ya->websocket == NULL || success == FALSE)) {
+					return;
+				}
+			} else {
+				if (G_UNLIKELY(ya->pc == NULL || success == FALSE )) {
+					return;
+				}
 			}
-		}
+        }
     }
 	if (!done_some_reads && read_len <= 0) {
 		if (read_len == -1 && (errno == EAGAIN ||
@@ -2585,19 +2646,30 @@ connection_error:
 }
 
 static void
-rc_socket_connected(gpointer userdata, PurpleSslConnection *conn, PurpleInputCondition cond)
+rc_socket_got_data_ssl(gpointer data, PurpleSslConnection *gsc,
+					PurpleInputCondition cond)
 {
-	RocketChatAccount *ya = userdata;
+	rc_socket_got_data(data, gsc);
+}
+
+static void
+rc_socket_got_data_proxy(gpointer data, gint source,
+								 PurpleInputCondition condition)
+{
+	rc_socket_got_data(data, NULL);
+}
+
+static void
+rc_socket_upgrade(RocketChatAccount *ya)
+{
 	gchar *websocket_header;
 	gchar *cookies;
 	const gchar *websocket_key = "15XF+ptKDhYVERXoGcdHTA=="; //TODO don't be lazy
 	GString *url = g_string_new(NULL);
-	
-	purple_ssl_input_add(ya->websocket, rc_socket_got_data, ya);
-	
+
 	g_string_append_printf(url, "%s/sockjs/%d/pidgin%d/websocket", ya->path, g_random_int_range(100, 999), g_random_int_range(1, 100));
 	cookies = rc_cookies_to_string(ya);
-	
+
 	websocket_header = g_strdup_printf("GET %s HTTP/1.1\r\n"
 							"Host: %s\r\n"
 							"Connection: Upgrade\r\n"
@@ -2611,42 +2683,82 @@ rc_socket_connected(gpointer userdata, PurpleSslConnection *conn, PurpleInputCon
 							//"Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits\r\n"
 							"\r\n", url->str, ya->server,
 							websocket_key, cookies);
-	
-	purple_ssl_write(ya->websocket, websocket_header, strlen(websocket_header));
-	
+	rc_sock_write(ya, websocket_header, strlen(websocket_header));
+
 	g_free(websocket_header);
 	g_string_free(url, TRUE);
 	g_free(cookies);
 }
 
 static void
-rc_socket_failed(PurpleSslConnection *conn, PurpleSslErrorType errortype, gpointer userdata)
+rc_socket_connected_ssl(gpointer data, PurpleSslConnection *conn,
+                                    PurpleInputCondition cond) {
+
+	PurpleConnection *gc = data;
+	RocketChatAccount *ya = purple_connection_get_protocol_data(gc);
+
+	/* In case the connection was closed earlier */
+	if(!PURPLE_CONNECTION_IS_VALID(gc)) {
+		purple_ssl_close(conn);
+		g_return_if_reached();
+	}
+
+	purple_ssl_input_add(ya->websocket, rc_socket_got_data_ssl, gc);
+
+	rc_socket_upgrade(ya);
+}
+
+static void
+rc_socket_connected_proxy(gpointer data, gint source, const gchar *error)
+{
+	PurpleConnection *gc = data;
+	RocketChatAccount *ya = purple_connection_get_protocol_data(gc);
+
+	if (source < 0) {
+		purple_connection_error_reason(ya->pc,
+									   PURPLE_CONNECTION_ERROR_NETWORK_ERROR,
+									   _("Unable to connect"));
+		return;
+	}
+
+	ya->fd = source;
+
+	gc->inpa = purple_input_add(ya->fd, PURPLE_INPUT_READ,
+								rc_socket_got_data_proxy, gc);
+
+	rc_socket_upgrade(ya);
+}
+
+static void
+rc_socket_ssl_failed(PurpleSslConnection *conn, PurpleSslErrorType errortype,
+					 gpointer userdata)
 {
 	RocketChatAccount *ya = userdata;
-	
+
 	ya->websocket = NULL;
 	ya->websocket_header_received = FALSE;
-	
+
 	if (errortype == PURPLE_SSL_CERTIFICATE_INVALID) {
 		purple_connection_ssl_error(ya->pc, errortype);
 		return;
 	}
-	
+
 	rc_restart_channel(ya);
 }
 
 static void
 rc_start_socket(RocketChatAccount *ya)
 {
+	PurpleConnection *gc = ya->pc;
 	gchar **server_split;
 	gint port = 443;
-	
+
 	//Reset all the old stuff
 	if (ya->websocket != NULL) {
-		purple_ssl_close(ya->websocket);
+			purple_ssl_close(ya->websocket);
 	}
-	
 	ya->websocket = NULL;
+    ya->fd = -1;
 	ya->websocket_header_received = FALSE;
 	g_free(ya->frame); ya->frame = NULL;
 	ya->packet_code = 0;
@@ -2657,8 +2769,23 @@ rc_start_socket(RocketChatAccount *ya)
 	if (server_split[1] != NULL) {
 		port = atoi(server_split[1]);
 	}
-	ya->websocket = purple_ssl_connect(ya->account, server_split[0], port, rc_socket_connected, rc_socket_failed, ya);
-	
+
+	if (ya->tls) {
+		ya->fd = -1;
+		ya->websocket = purple_ssl_connect(ya->account, server_split[0], port,
+										   rc_socket_connected_ssl,
+										   rc_socket_ssl_failed,
+										   gc);
+	} else {
+		if (purple_proxy_connect(ya->pc, ya->account,
+								 server_split[0], port,
+								 rc_socket_connected_proxy, ya->pc) == NULL) {
+			purple_connection_error_reason(ya->pc,
+										   PURPLE_CONNECTION_ERROR_NETWORK_ERROR,
+										   _("Unable to connect"));
+		}
+	}
+
 	g_strfreev(server_split);
 }
 
@@ -3582,7 +3709,8 @@ rc_add_buddy(PurpleConnection *pc, PurpleBuddy *buddy, PurpleGroup *group
 	
 	
 	//avatar at https://{server}/avatar/{username}.jpg?_dc=0
-	avatar_url = g_strdup_printf("https://%s%s/avatar/%s.jpg?_dc=0", ya->server, ya->path, purple_url_encode(buddy_name));
+	avatar_url = g_strdup_printf("%s%s%s/avatar/%s.jpg?_dc=0", ya->http_str, ya->server,
+								 ya->path, purple_url_encode(buddy_name));
 	rc_fetch_url(ya, avatar_url, NULL, rc_got_avatar, buddy);
 	g_free(avatar_url);
 	
@@ -3633,6 +3761,7 @@ static GList *
 rc_add_account_options(GList *account_options)
 {
 	PurpleAccountOption *option;
+    GList *encryption_values = NULL;
 	
 	option = purple_account_option_bool_new(N_("Auto-add buddies to the buddy list"), "auto-add-buddy", FALSE);
 	account_options = g_list_append(account_options, option);
@@ -3648,6 +3777,24 @@ rc_add_account_options(GList *account_options)
 	
 	option = purple_account_option_string_new(N_("Server Path"), "server_path", "");
 	account_options = g_list_append(account_options, option);
+
+#define ADD_VALUE(list, desc, v) { \
+	PurpleKeyValuePair *kvp = g_new0(PurpleKeyValuePair, 1); \
+	kvp->key = g_strdup((desc)); \
+	kvp->value = g_strdup((v)); \
+	list = g_list_prepend(list, kvp); \
+}
+
+
+	ADD_VALUE(encryption_values, _("No encryption"), "no_tls");
+	ADD_VALUE(encryption_values, _("Require encryption"), "tls");
+
+#undef ADD_VALUE
+
+	option = purple_account_option_list_new(_("Connection security"),
+                                            "connection_security", encryption_values);
+	account_options = g_list_append(account_options, option);
+
 	return account_options;
 }
 
