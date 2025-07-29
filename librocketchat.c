@@ -2164,7 +2164,13 @@ rc_login(PurpleAccount *account)
 	//Build the initial hash tables from the current buddy list
 	rc_build_groups_from_blist(ya);
 
+	// Older server version
 	url = g_strconcat("https://", ya->server, ya->path, "/api/me", NULL);
+	rc_fetch_url(ya, url, NULL, rc_login_me_cb, NULL);
+	g_free(url);
+
+	// Newer server version
+	url = g_strconcat("https://", ya->server, ya->path, "/api/v1/me", NULL);
 	rc_fetch_url(ya, url, NULL, rc_login_me_cb, NULL);
 	g_free(url);
 }
