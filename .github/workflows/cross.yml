@@ -49,10 +49,13 @@ jobs:
           mkdir -p win32-dev
           curl --http1.1 -L https://download.gnome.org/binaries/win32/glib/2.28/glib-dev_2.28.8-1_win32.zip -o glib-dev.zip
           unzip glib-dev.zip -d win32-dev/glib-2.28.8
+          rm glib-dev.zip
           curl --http1.1 -L https://download.gnome.org/binaries/win32/dependencies/gettext-runtime-dev_0.18.1.1-2_win32.zip -o gettext-runtime.zip
           unzip gettext-runtime.zip -d win32-dev/glib-2.28.8
+          rm gettext-runtime.zip
           curl --http1.1 -L https://download.gnome.org/binaries/win32/dependencies/zlib-dev_1.2.5-2_win32.zip -o zlib-dev.zip
           unzip zlib-dev.zip -d win32-dev/glib-2.28.8
+          rm zlib-dev.zip
           cd win32-dev
           curl --http1.1 -L https://github.com/jgeboski/purple-facebook/releases/download/downloads/json-glib-0.14.tar.gz -o json-glib.tar.gz
           tar -xf json-glib.tar.gz
@@ -61,6 +64,7 @@ jobs:
           ls win32-dev/
       
       - name: libdiscount build
+        if: steps.win32-cache.outputs.cache-hit != 'true'
         run: |
           cd win32-dev
           curl --http1.1 -L https://github.com/Orc/discount/archive/refs/tags/2.2.1.tar.gz -o discount.tar.gz
@@ -68,7 +72,7 @@ jobs:
           rm discount.tar.gz
           cd discount-*
           ./configure.sh
-          export CC=i686-w64-mingw32-gcc
+          make mktags
           echo "#ifndef __AC_MARKDOWN_D" > config.h
           echo "#define __AC_MARKDOWN_D 1" >> config.h
           echo "#define OS_CYGWIN_NT 1" >> config.h
@@ -92,6 +96,7 @@ jobs:
           echo "#define PATH_FIND \"/usr/bin/find\"" >> config.h
           echo "#define PATH_SED \"/usr/bin/sed\"" >> config.h
           echo "#endif/* __AC_MARKDOWN_D */" >> config.h
+          sed -i 's/^CC=cc/CC=i686-w64-mingw32-gcc/' Makefile
           make libmarkdown
           rm libmarkdown.a
           i686-w64-mingw32-ar crv libmarkdown.a *.o
