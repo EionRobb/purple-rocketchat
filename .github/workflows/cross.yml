@@ -118,7 +118,7 @@ jobs:
             path: lib*.dll
 
       - name: release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !env.ACT
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && !env.ACT
         uses: ncipollo/release-action@v1
         with:
           artifacts: lib*.dll
@@ -128,7 +128,7 @@ jobs:
           makeLatest: true
 
       - name: attest
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !env.ACT
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && !env.ACT
         uses: actions/attest-build-provenance@v1
         with:
           subject-path: lib*.dll
