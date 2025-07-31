@@ -23,8 +23,8 @@
 #define g_hash_table_contains(hash_table, key) g_hash_table_lookup_extended(hash_table, key, NULL, NULL)
 #endif /* 2.32.0 */
 
-#if !GLIB_CHECK_VERSION(2, 68, 0) && !PURPLE_VERSION_CHECK(2, 14, 2)
-#define g_memdump2 g_memdump
+#if !GLIB_CHECK_VERSION(2, 68, 0)
+#define g_memdup2 g_memdup
 #endif
 
 static gboolean
@@ -706,10 +706,12 @@ size_t rc_sock_read(RocketChatAccount *ya, gpointer sock, void *buf, size_t len)
 static int rc_sock_write(RocketChatAccount *ya, void *data, int len) {
 	int ret;
 
-	if (ya->tls)
+	if (ya->tls) {
 		ret = purple_ssl_write(ya->websocket, data, len);
-	else
+	} else {
+		g_return_val_if_fail(ya->fd > 0, -1);
 		ret = write(ya->fd, data, len);
+	}
 
 	return ret;
 }
@@ -840,7 +842,7 @@ rc_fetch_url(RocketChatAccount *ya, const gchar *url, const gchar *postdata, Roc
     if (!purple_strequal(ya->websocket_server, ya->server)) {
 		purple_http_request_header_set(request, "Host", ya->websocket_server);
 		purple_debug_misc("rocketchat" , "Proxy enabled, sending %s instead of %s\n",
-						  host, ya->server);
+						  ya->websocket_server, ya->server);
     }
 	purple_http_request_header_set(request, "Accept", "*/*");
 	purple_http_request_header_set(request, "User-Agent", ROCKETCHAT_USERAGENT);
@@ -878,6 +880,7 @@ rc_fetch_url(RocketChatAccount *ya, const gchar *url, const gchar *postdata, Roc
 	headers = g_string_new(NULL);
 
 	if (!purple_strequal(ya->websocket_server, ya->server)) {
+		g_free(host);
 		host = g_strdup(ya->websocket_server);
 		purple_debug_misc("rocketchat" , "Proxy enabled, sending %s instead of %s\n",
 						  host, ya->server);
@@ -2276,8 +2279,8 @@ rc_close(PurpleConnection *pc)
 		purple_ssl_close(ya->websocket);
 	else if (ya->fd > 0) {
 #if !PURPLE_VERSION_CHECK(3, 0, 0)
-		if (ya->pc->inpa)
-			purple_input_remove(ya->pc->inpa);
+		if (ya->inpa)
+			purple_input_remove(ya->inpa);
 		close(ya->fd);
 #else
 		//FIXME Purple 3.x
@@ -2753,7 +2756,7 @@ rc_socket_connected_proxy(gpointer data, gint source, const gchar *error)
 
 	ya->fd = source;
 
-	gc->inpa = purple_input_add(ya->fd, PURPLE_INPUT_READ,
+	ya->inpa = purple_input_add(ya->fd, PURPLE_INPUT_READ,
 								rc_socket_got_data_proxy, gc);
 
 	rc_socket_upgrade(ya);
