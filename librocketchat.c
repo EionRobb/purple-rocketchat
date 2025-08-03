@@ -2645,7 +2645,9 @@ rc_socket_got_data(gpointer data, PurpleSslConnection *gsc)
     }
 	if (!done_some_reads && read_len <= 0) {
 		if (read_len == -1 && (errno == EAGAIN ||
+#ifndef _WIN32
 							   errno == EINPROGRESS ||
+#endif
 							   errno == ENOENT)) {
 			return;
 		}
