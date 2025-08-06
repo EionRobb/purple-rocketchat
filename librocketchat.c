@@ -748,14 +748,14 @@ gpointer user_data, const gchar *url_text, gsize len, const gchar *error_message
 	body_len = len;
 #endif
 	if (body == NULL && error_message != NULL) {
-		//connection error - unersolvable dns name, non existing server
+		//connection error - unresolvable dns name, non existing server
 		gchar *error_msg_formatted = g_strdup_printf(_("Connection error: %s."), error_message);
 		purple_connection_error(conn->ya->pc, PURPLE_CONNECTION_ERROR_NETWORK_ERROR, error_msg_formatted);
 		g_free(error_msg_formatted);
 		goto out;
 	}
 #if !PURPLE_VERSION_CHECK(3, 0, 0)
-    else {
+    else if (body == NULL) {
         /* Purple 2.x doesn't check for the http status to be successful so let's
          * do that here quick.
          * Borrowed and then adapted from purple2compat http.c
@@ -2248,6 +2248,13 @@ rc_login_me_cb(RocketChatAccount *ya, JsonNode *node, gpointer user_data,
 {
     if(!ya) return;
     // TODO: Add else that parses the error status
+	JsonObject *obj = json_node_get_object(node);
+
+	// We don't care if it's a success or an error, we just want to know if the server is a Rocket.Chat server
+	if (!json_object_has_member(obj, "success")) {
+		purple_connection_error(ya->pc, PURPLE_CONNECTION_ERROR_AUTHENTICATION_FAILED, "Failed to connect to server");
+		return;
+	}
 
 	rc_start_socket(ya);
 
