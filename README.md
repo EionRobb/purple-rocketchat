@@ -10,14 +10,14 @@ make && sudo make install
 ```
 
 ### Requirements ###
-libpurple, libjson-glib, glib, libmarkdown2 aka discount
+libpurple, libjson-glib, glib
 
 ### Debian-based distros ###
 Run the following commands from a terminal
 
 ```shell
 #!sh
-sudo apt-get install libpurple-dev libjson-glib-dev libglib2.0-dev git make libmarkdown2-dev;
+sudo apt-get install libpurple-dev libjson-glib-dev libglib2.0-dev git make;
 git clone https://github.com/EionRobb/purple-rocketchat && cd purple-rocketchat;
 make && sudo make install
 ```
@@ -32,7 +32,7 @@ Run the following commands from a terminal
 
 ```shell
 #!sh
-dnf install libpurple-devel.x86_64 libmarkdown-devel.x86_64 json-glib-devel.x86_64 glib2.x86_64
+dnf install libpurple-devel.x86_64 json-glib-devel.x86_64 glib2.x86_64
 git clone https://github.com/EionRobb/purple-rocketchat && cd purple-rocketchat;
 make && sudo make install
 ```
